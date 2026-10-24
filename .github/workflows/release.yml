@@ -1,0 +1,84 @@
+# Every push to main builds the mod and the latest libfpv for 32-bit Windows
+# and publishes gtasa-fpv.zip as a new GitHub release. The ZIP's contents go
+# straight into the game's modloader folder; docs/INSTALL.md becomes the release page.
+# Run it by hand (Actions > Release > Run workflow) to pick up a new libfpv.
+name: Release
+
+# Temporarily manual only: re-enable the push trigger below to release on every push.
+on:
+  # push:
+  #   branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gtasa-fpv
+
+      - uses: actions/checkout@v4
+        with:
+          repository: hammerill/libfpv
+          path: libfpv
+          # Top level only: SimITL's own nested submodules use SSH URLs, and
+          # libfpv builds from its flattened copies in third_party/ instead.
+          submodules: true
+
+      - name: Install the i686 MinGW-w64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix zip
+
+      - name: Build libfpv (i686)
+        run: |
+          cmake -S libfpv -B libfpv/build/win32 \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/libfpv/cmake/toolchains/mingw-w64-i686.cmake" \
+            -DLIBFPV_BUILD_TESTS=OFF -DLIBFPV_BUILD_EXAMPLES=OFF
+          cmake --build libfpv/build/win32 -j"$(nproc)"
+
+      - name: Build the mod
+        run: |
+          cmake -S gtasa-fpv -B gtasa-fpv/build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/gtasa-fpv/cmake/mingw-w64-i686.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLIBFPV_DIR="$GITHUB_WORKSPACE/libfpv"
+          cmake --build gtasa-fpv/build -j"$(nproc)"
+
+      - name: Package
+        run: |
+          mkdir -p "dist/pkg/FPV Drone"
+          cp gtasa-fpv/build/GTASA.FPV.asi gtasa-fpv/build/GTASA.FPV.core.dll libfpv/build/win32/libfpv.dll "dist/pkg/FPV Drone/"
+          cp libfpv/LICENSE "dist/pkg/FPV Drone/libfpv.LICENSE.txt"
+          (cd dist/pkg && zip -9 -r ../gtasa-fpv.zip "FPV Drone")
+          unzip -l dist/gtasa-fpv.zip
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mod_sha=$(git -C gtasa-fpv rev-parse HEAD)
+          lib_sha=$(git -C libfpv rev-parse HEAD)
+          {
+            cat gtasa-fpv/docs/INSTALL.md
+            echo
+            echo "## This build"
+            echo
+            echo "- gtasa-fpv [\`${mod_sha:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${mod_sha}): $(git -C gtasa-fpv log -1 --format=%s)"
+            echo "- libfpv [\`${lib_sha:0:7}\`](https://github.com/hammerill/libfpv/commit/${lib_sha}) (source of \`libfpv.dll\`, GPL-3.0-or-later)"
+          } > dist/notes.md
+          tag="build-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" dist/gtasa-fpv.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$mod_sha" \
+            --title "GTA San Andreas FPV build ${GITHUB_RUN_NUMBER} ($(date -u +%Y-%m-%d))" \
+            --notes-file dist/notes.md \
+            --latest

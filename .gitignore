@@ -1,0 +1,9 @@
+build/
+*.dll
+*.asi
+*.exe
+*.img
+*.txd
+*.dff
+*.log
+backups/
