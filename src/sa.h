@@ -71,6 +71,8 @@ constexpr CallSite kIdleMessages = {0x53EBA9, 0x69EFC0};      // CMessages::Disp
 // RsMouseSetPos(&centre), every frame outside the pause menu (non-exclusive DirectInput mouse,
 // so the OS cursor is what gets pinned).
 constexpr CallSite kIdleMouseSetPos = {0x53E9F1, 0x6194A0};
+// CGame::Process (0x53BEE0): the pads update, then CMenuManager::Process opens the pause menu on Esc.
+constexpr CallSite kGameUpdatePads = {0x53BEE6, 0x541DD0};  // CPad::UpdatePads()
 // FrontendIdle (0x53E770), the menus.
 constexpr CallSite kFrontendUpdatePads = {0x53E78B, 0x541DD0};  // CPad::UpdatePads()
 constexpr CallSite kFrontendEndUpdate = {0x53E87D, 0x7EE180};
@@ -130,6 +132,10 @@ inline CPlaceable *&ignore_entity() { return *reinterpret_cast<CPlaceable **>(0x
 // CPad::DisablePlayerControls, a bit mask; we own one bit of it.
 constexpr uintptr_t kPadDisableControls = 0x10E;
 constexpr uint16_t kPadDisabledByFpv = 0x4000;
+
+// CPad::NewKeyState.esc (CKeyboardState at 0xB73190, esc at +0x218): the pause menu opens on its
+// press, so clearing it after the pads update hides Esc from the game.
+inline int16_t &new_key_esc() { return *reinterpret_cast<int16_t *>(0xB733A8); }
 
 // eWeaponType / ePedPieceTypes / eExplosionType values we use.
 constexpr int kWeaponRammedByCar = 49;

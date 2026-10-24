@@ -20,7 +20,7 @@ namespace {
 // What the redirected calls went to before (the game, or another mod).
 struct Original {
     uintptr_t set_fov, render_scene, idle_end_update, frontend_end_update, hud, radio_name, pickup_text, messages_2d,
-        hud_after_fade, messages_after_fade, mouse_set_pos;
+        hud_after_fade, messages_after_fade, mouse_set_pos, update_pads;
     void *release_video_memory;
 };
 Original g;
@@ -75,6 +75,18 @@ void __cdecl mouse_set_pos_hook(void *pos) {
     reinterpret_cast<void(__cdecl *)(void *)>(g.mouse_set_pos)(pos);
 }
 
+// CGame::Process -> CPad::UpdatePads(): Esc closes libfpv's overlay (or its
+// popup), so the game must not see it and open the pause menu. It stays hidden until
+// released, or the press that closed the overlay pauses the game a frame later.
+void __cdecl update_pads_hook() {
+    static bool swallow_esc = false;
+    reinterpret_cast<VoidFn>(g.update_pads)();
+    int16_t &esc = sa::new_key_esc();
+    if (!esc) swallow_esc = false;
+    else if (fpvapi::loaded() && fpvapi::fpv.fpv_overlay_is_open()) swallow_esc = true;
+    if (swallow_esc) esc = 0;
+}
+
 // D3D9DeviceReleaseVideoMemory: RenderWare is about to Reset the device (alt-tab,
 // resolution change). Our D3DPOOL_DEFAULT texture must go first or Reset fails.
 int __cdecl release_video_memory_hook() {
@@ -97,13 +109,14 @@ void install_hooks() {
     g.hud_after_fade = hook_call(sa::kIdleHudAfterFade, reinterpret_cast<void *>(&hud_after_fade_hook));
     g.messages_after_fade = hook_call(sa::kIdleMessages, reinterpret_cast<void *>(&messages_after_fade_hook));
     g.mouse_set_pos = hook_call(sa::kIdleMouseSetPos, reinterpret_cast<void *>(&mouse_set_pos_hook));
+    g.update_pads = hook_call(sa::kGameUpdatePads, reinterpret_cast<void *>(&update_pads_hook));
     g.release_video_memory = patch::detour(0x7F7F70, kReleaseVideoMemoryPrologue, sizeof kReleaseVideoMemoryPrologue,
                                            reinterpret_cast<void *>(&release_video_memory_hook));
     standin::install_hooks();
-    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d, text %d %d %d, mouse %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
+    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d, text %d %d %d, mouse %d, pads %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
                   g.idle_end_update != 0, g.frontend_end_update != 0, g.hud != 0, g.radio_name != 0,
                   g.pickup_text != 0, g.messages_2d != 0, g.hud_after_fade != 0, g.messages_after_fade != 0,
-                  g.mouse_set_pos != 0, g.release_video_memory != nullptr);
+                  g.mouse_set_pos != 0, g.update_pads != 0, g.release_video_memory != nullptr);
 }
 
 // The first reading of each key is only a baseline: a key held while the

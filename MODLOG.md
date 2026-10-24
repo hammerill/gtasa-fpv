@@ -171,3 +171,7 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
   faded out. SA's DirectInput mouse is non-exclusive (diMouseInit 0x7469A0: DISCL_NONEXCLUSIVE|FOREGROUND in game),
   so the OS cursor moves normally otherwise. Fix: that call is redirected and skipped while the overlay is open (ImGui
   draws its own cursor). Built and deployed; not yet verified in game.
+- Esc closes the F8 overlay: libfpv's overlay now closes on Esc itself (after a popup or text field takes it). The
+  game opened its pause menu on the same press: CGame::Process -> CPad::UpdatePads (0x53BEE6) is redirected and
+  clears CPad::NewKeyState.esc (0xB733A8; CMenuManager::CheckForMenuClosing 0x576B70 checks New && !Old) while the
+  overlay is open, and until Esc is released.
