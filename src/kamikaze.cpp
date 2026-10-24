@@ -15,61 +15,67 @@ namespace {
 
 using fpvapi::fpv;
 
-constexpr uint32_t kEndingAction = 2;  // F8 > Fly button id (1 is Move CJ here)
+// Up to the 2026-10 libfpv, the mod kept its own "After the blast" choice
+// here; libfpv's F8 > Kamikaze tab has it now. A saved "cutscene" carries over once.
+std::string old_settings_file() { return paths::mod_dir() + "\\fpv-data\\gtasa-fpv.ini"; }
 
-std::string settings_file() { return paths::mod_dir() + "\\fpv-data\\gtasa-fpv.ini"; }
-
-Ending g_ending = Ending::SignalLost;
 bool g_ready = false;
 
-void load_setting() {
+void migrate_old_setting() {
+    std::string file = old_settings_file();
+    FILE *f = std::fopen(file.c_str(), "r");
+    if (!f) return;
     char buf[256] = {};
-    if (FILE *f = std::fopen(settings_file().c_str(), "r")) {
-        std::fread(buf, 1, sizeof buf - 1, f);
-        std::fclose(f);
+    std::fread(buf, 1, sizeof buf - 1, f);
+    std::fclose(f);
+    if (std::strstr(buf, "after_blast=cutscene")) {
+        fpv_kamikaze_config kc{};
+        kc.struct_size = sizeof kc;
+        if (!fpv.fpv_kamikaze_set_config || fpv.fpv_kamikaze_get_config(&kc) != FPV_OK || kc.struct_size < sizeof kc)
+            return;  // an older libfpv
+        kc.ending_view = FPV_KAMIKAZE_VIEW_CUTSCENE;
+        if (fpv.fpv_kamikaze_set_config(&kc) != FPV_OK) return;
+        fpvlog::write("kamikaze: old after_blast=cutscene moved to libfpv's ending view");
     }
-    g_ending = std::strstr(buf, "after_blast=cutscene") ? Ending::Cutscene : Ending::SignalLost;
-}
-
-void save_setting() {
-    if (FILE *f = std::fopen(settings_file().c_str(), "w")) {
-        std::fprintf(f, "after_blast=%s\n", g_ending == Ending::Cutscene ? "cutscene" : "signal_lost");
-        std::fclose(f);
-    }
-}
-
-void update_button() {
-    fpv.fpv_overlay_set_action(kEndingAction, g_ending == Ending::Cutscene ? "After the blast: Cutscene (click to change)"
-                                                                           : "After the blast: Signal lost (click to change)");
+    std::remove(file.c_str());
 }
 
 }  // namespace
 
-Ending ending() { return g_ending; }
-
-float ending_seconds() {
+EndingChoice ending_choice() {
+    EndingChoice e;
+    if (!fpvapi::kamikaze()) return e;
     fpv_kamikaze_config kc{};
     kc.struct_size = sizeof kc;
-    kc.ending_duration = 3.0f;
-    if (fpvapi::kamikaze()) fpv.fpv_kamikaze_get_config(&kc);
-    return kc.ending_duration > 0 ? kc.ending_duration : 3.0f;
+    // An older libfpv fills less (no view/then): those keep the defaults.
+    kc.ending_duration = e.seconds;
+    kc.ending_view = e.view;
+    kc.ending_then = e.then;
+    if (fpv.fpv_kamikaze_get_config(&kc) != FPV_OK) return e;
+    e.view = kc.ending_view == FPV_KAMIKAZE_VIEW_CUTSCENE ? uint32_t(FPV_KAMIKAZE_VIEW_CUTSCENE) : uint32_t(FPV_KAMIKAZE_VIEW_SIGNAL_LOST);
+    e.seconds = kc.ending_duration >= 0 && kc.ending_duration <= 30 ? kc.ending_duration : 3.0f;
+    e.then = kc.ending_then <= FPV_KAMIKAZE_THEN_NOTHING ? kc.ending_then : uint32_t(FPV_KAMIKAZE_THEN_RESPAWN);
+    return e;
 }
 
 void init() {
     if (g_ready || !fpvapi::kamikaze()) return;
     g_ready = true;
-    load_setting();
-    update_button();
-    fpvlog::write("kamikaze: after the blast: %s", g_ending == Ending::Cutscene ? "cutscene" : "signal lost");
-}
-
-bool on_action(uint32_t id) {
-    if (id != kEndingAction || !g_ready) return false;
-    g_ending = g_ending == Ending::Cutscene ? Ending::SignalLost : Ending::Cutscene;
-    save_setting();
-    update_button();
-    fpvlog::write("kamikaze: after the blast now: %s", g_ending == Ending::Cutscene ? "cutscene" : "signal lost");
-    return true;
+    if (fpv.fpv_kamikaze_set_ending_support) {
+        const uint32_t views = (1u << FPV_KAMIKAZE_VIEW_SIGNAL_LOST) | (1u << FPV_KAMIKAZE_VIEW_CUTSCENE);
+        const uint32_t thens =
+            (1u << FPV_KAMIKAZE_THEN_RESPAWN) | (1u << FPV_KAMIKAZE_THEN_RECALL) | (1u << FPV_KAMIKAZE_THEN_NOTHING);
+        fpv_result r = fpv.fpv_kamikaze_set_ending_support(views, thens, FPV_KAMIKAZE_VIEW_SIGNAL_LOST,
+                                                           FPV_KAMIKAZE_THEN_RESPAWN);
+        if (r != FPV_OK) fpvlog::write("fpv_kamikaze_set_ending_support: %s", fpv.fpv_result_string(r));
+        migrate_old_setting();
+    } else {
+        fpvlog::write("kamikaze: libfpv without ending choices (older build): signal lost, then respawn");
+    }
+    EndingChoice e = ending_choice();
+    fpvlog::write("kamikaze: after the blast: %s for %.1f s, then %s",
+                  e.view == FPV_KAMIKAZE_VIEW_CUTSCENE ? "cutscene" : "signal lost", e.seconds,
+                  e.then == FPV_KAMIKAZE_THEN_RECALL ? "recall" : e.then == FPV_KAMIKAZE_THEN_NOTHING ? "nothing" : "respawn");
 }
 
 void explode(const fpv_detonation &d) {

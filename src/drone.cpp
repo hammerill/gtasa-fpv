@@ -56,12 +56,18 @@ Shot g_shot;
 float g_fov_scale = 0.75f;   // 4:3 horizontal FOV, the vanilla game
 float g_fov_passed = 0;      // what we gave SetFOV this frame, degrees
 
-// Kamikaze builds: after the warhead went off, the flight ends with static in
-// the goggles or an outside shot of the blast, then CJ gets control back.
+// Kamikaze builds: after the warhead went off, static in the goggles or an
+// outside shot of the blast for a while (F8 > Kamikaze), then a respawn, back
+// to CJ, or nothing (the view stays until the player acts). Timed with the
+// game's clock, so a paused game pauses it too.
 struct Ending {
     bool on = false;
-    kamikaze::Ending kind = kamikaze::Ending::SignalLost;
-    LARGE_INTEGER t0;
+    bool shown = false;     // the view is up (false: duration 0, straight to "then")
+    bool cutscene = false;  // the view is the outside shot (else signal lost)
+    bool timed = false;     // false: held until the player respawns, recalls or moves CJ
+    uint32_t then = FPV_KAMIKAZE_THEN_RESPAWN;
+    uint32_t end_ms = 0;  // sa::timer_ms() when "then" happens
+    View view_before = View::Fpv;  // the camera to go back to after a respawn
 };
 Ending g_ending;
 
@@ -286,13 +292,6 @@ void stop(bool go_home = true) {
     fpvlog::write("drone stopped");
 }
 
-float seconds_since(const LARGE_INTEGER &t) {
-    LARGE_INTEGER now, freq;
-    QueryPerformanceCounter(&now);
-    QueryPerformanceFrequency(&freq);
-    return float(now.QuadPart - t.QuadPart) / float(freq.QuadPart);
-}
-
 // Cutscene: a camera behind and above where the drone came from, pulled in
 // front of any wall in the way, watching the blast.
 void place_blast_camera(const fpv_detonation &d) {
@@ -330,21 +329,56 @@ void place_blast_camera(const fpv_detonation &d) {
     fpvlog::write("kamikaze: cutscene camera at %.2f %.2f %.2f (%.1f m clear)", from[0], from[1], from[2], best_clear);
 }
 
+const char *then_name(uint32_t then) {
+    return then == FPV_KAMIKAZE_THEN_RECALL ? "recall" : then == FPV_KAMIKAZE_THEN_NOTHING ? "nothing" : "respawn";
+}
+
+// The player's F8 > Kamikaze choice (or the autotest's), read at the blast.
+// The "then" itself runs from tick(), outside the camera hook.
 void begin_ending(const fpv_detonation &d) {
+    kamikaze::EndingChoice e = kamikaze::ending_choice();
+    if (tuning().after_blast >= 0)
+        e.view = tuning().after_blast == 1 ? FPV_KAMIKAZE_VIEW_CUTSCENE : FPV_KAMIKAZE_VIEW_SIGNAL_LOST;
+    if (tuning().ending_secs >= 0) e.seconds = tuning().ending_secs;
+    if (tuning().ending_then >= 0) e.then = uint32_t(tuning().ending_then);
+    g_ending = Ending{};
     g_ending.on = true;
-    g_ending.kind = tuning().after_blast == 1   ? kamikaze::Ending::Cutscene
-                    : tuning().after_blast == 0 ? kamikaze::Ending::SignalLost
-                                                : kamikaze::ending();
-    QueryPerformanceCounter(&g_ending.t0);
-    fpv.fpv_overlay_set_action(kMoveCjAction, nullptr);  // nothing left to move CJ to
-    if (g_ending.kind == kamikaze::Ending::Cutscene) {
+    g_ending.then = e.then;
+    g_ending.view_before = g_view;
+    // "Nothing" keeps the view up whatever the duration: there is nothing else to show.
+    g_ending.shown = e.seconds > 0 || e.then == FPV_KAMIKAZE_THEN_NOTHING;
+    g_ending.timed = e.then != FPV_KAMIKAZE_THEN_NOTHING;
+    g_ending.end_ms = sa::timer_ms() + (e.seconds > 0 ? uint32_t(e.seconds * 1000.0f) : 0);
+    g_ending.cutscene = g_ending.shown && e.view == FPV_KAMIKAZE_VIEW_CUTSCENE;
+    fpvlog::write("kamikaze: ending: %s%s, then %s", !g_ending.shown ? "no view" : g_ending.cutscene ? "cutscene" : "signal lost",
+                  g_ending.timed && g_ending.shown ? "" : g_ending.shown ? " until the player acts" : "", then_name(e.then));
+    if (g_ending.timed && g_ending.shown) fpvlog::write("kamikaze: view for %.1f s (game time)", e.seconds);
+    if (!g_ending.shown) return;
+    if (g_ending.cutscene) {
         place_blast_camera(d);
     } else {
         g_view = View::Fpv;  // the goggles
         audio::set_static(true);
     }
-    g_osd_visible = g_ending.kind == kamikaze::Ending::SignalLost;
+    g_osd_visible = !g_ending.cutscene;
     g_osd_no_signal = g_osd_visible;
+}
+
+// The blast's view is over: back to the live feed (the drone was just reset).
+void clear_ending() {
+    if (!g_ending.on) return;
+    if (g_ending.shown && !g_ending.cutscene) audio::set_static(false);
+    g_view = g_ending.view_before;
+    g_ending = Ending{};
+    g_osd_no_signal = false;
+}
+
+// R, or the ending's "respawn": repaired, at the launch point.
+void respawn_drone() {
+    standin::end(true);  // CJ home first: the spawn's collision must be streamed in
+    fpv.fpv_drone_reset(g_drone, g_spawn_pos, g_spawn_rot);
+    fpv.fpv_drone_repair(g_drone);
+    clear_ending();
 }
 
 // One libfpv step; called from inside CCamera::Process so the camera it
@@ -384,7 +418,7 @@ void step() {
         }
     }
     if (!g_ending.on) g_osd_visible = g_view == View::Fpv;
-    if (!g_ending.on || g_ending.kind == kamikaze::Ending::SignalLost)
+    if (!g_ending.cutscene)
         apply_camera(g_view == View::Fpv ? frame.camera : g_view == View::Chase ? frame.chase_camera : frame.los_camera,
                      g_view == View::Fpv);
 
@@ -460,6 +494,14 @@ void move_cj_here() {
                   pos[0], pos[1], z, ground ? "hit" : "missed", heading * kRadToDeg);
 }
 
+void respawn() {
+    if (!g_drone) return;
+    if (g_ending.on) fpvlog::write("kamikaze: ending cut short: respawn");
+    respawn_drone();
+}
+
+bool ending() { return g_ending.on; }
+
 const fpv_frame &last_frame() { return g_frame; }
 
 namespace {
@@ -474,7 +516,7 @@ void rotate(const float q[4], const float v[3], float out[3]) {
 }  // namespace
 
 bool model_pose(ModelPose *out) {
-    if (!g_drone || !g_have_frame || !g_shot.on || (g_view == View::Fpv && !g_ending.on)) return false;
+    if (!g_drone || !g_have_frame || !g_shot.on || (g_view == View::Fpv && !g_ending.cutscene)) return false;
     const fpv_frame &f = g_frame;
     // libfpv rotations map the host's right/up/forward (east, up, north) to world axes.
     static const float kRight[3] = {1, 0, 0}, kUp[3] = {0, 0, 1}, kForward[3] = {0, 1, 0};
@@ -563,8 +605,7 @@ void tick() {
     forward_keys();
     hold_cj_for_overlay();
     bool move_cj = false;  // F8 buttons work on foot too, but Move CJ here only in flight
-    for (uint32_t id; (id = fpv.fpv_overlay_poll_action()) != 0;)
-        if (!kamikaze::on_action(id)) move_cj |= id == kMoveCjAction && !g_ending.on;
+    for (uint32_t id; (id = fpv.fpv_overlay_poll_action()) != 0;) move_cj |= id == kMoveCjAction;
     if (!g_drone) return;
 
     sa::CPed *cj = sa::FindPlayerPed();
@@ -573,25 +614,23 @@ void tick() {
         stop();
         return;
     }
-    if (g_ending.on) {
-        // static in the goggles or an outside shot of the blast, then back to CJ
-        if (seconds_since(g_ending.t0) > kamikaze::ending_seconds()) {
-            fpvlog::write("kamikaze: %s over, back to CJ",
-                          g_ending.kind == kamikaze::Ending::Cutscene ? "cutscene" : "signal lost");
-            stop();
+    // During the blast's view, R / F7 / Y (and the F8 button) act at once and
+    // replace the ending's own "then".
+    bool camera_key = key_pressed('C'), reset_key = key_pressed('R'), cj_key = key_pressed('Y');
+    if (!fpv.fpv_overlay_wants_input()) {  // otherwise the keys belong to the overlay
+        move_cj |= cj_key;
+        if (camera_key && !g_ending.on) g_view = View((int(g_view) + 1) % int(View::Count));
+        if (reset_key) respawn();
+    }
+    if (g_ending.on && !move_cj && g_ending.timed && int32_t(sa::timer_ms() - g_ending.end_ms) >= 0) {
+        fpvlog::write("kamikaze: ending over, %s", then_name(g_ending.then));
+        if (g_ending.then == FPV_KAMIKAZE_THEN_RECALL) {
+            stop();  // as F7: CJ back in control where he stood
             return;
         }
+        respawn_drone();
     }
-    bool camera_key = key_pressed('C'), reset_key = key_pressed('R'), cj_key = key_pressed('Y');
-    if (!fpv.fpv_overlay_wants_input() && !g_ending.on) {  // otherwise the keys belong to the overlay
-        move_cj |= cj_key;
-        if (camera_key) g_view = View((int(g_view) + 1) % int(View::Count));
-        if (reset_key) {
-            standin::end(true);  // CJ home first: the spawn's collision must be streamed in
-            fpv.fpv_drone_reset(g_drone, g_spawn_pos, g_spawn_rot);
-            fpv.fpv_drone_repair(g_drone);
-        }
-    }
+    if (g_ending.on && move_cj) fpvlog::write("kamikaze: ending cut short: Move CJ here");
     hold_cj(true);  // scripts may have cleared the pad's state (cutscenes, missions)
     if (move_cj && g_have_frame) move_cj_here();
 }

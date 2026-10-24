@@ -26,8 +26,15 @@ bool active();
 bool hide_hud();
 bool hide_text();
 
-// Ends the flight with CJ standing under the drone (F8 > Fly button, Y key). Game thread only.
+// Ends the flight with CJ standing under the drone (F8 > Fly button, Y key), also
+// during a blast's ending (under the wreck). Game thread only.
 void move_cj_here();
+
+// Back to the launch point, repaired (R key). Cuts a blast's ending short. Game thread only.
+void respawn();
+
+// A kamikaze blast's view (or its "then") is under way.
+bool ending();
 
 // The frame from the latest tick (struct_size 0 before the first one).
 const fpv_frame &last_frame();
@@ -56,7 +63,9 @@ struct Tuning {
     float fov = 0;        // vertical degrees, overrides libfpv's FPV FOV
     float near_clip = 0;  // overrides kNearClip
     bool osd = true;
-    int after_blast = -1;  // 0 signal lost, 1 cutscene; -1 = the player's F8 choice
+    int after_blast = -1;    // ending view: 0 signal lost, 1 cutscene; -1 = the player's F8 > Kamikaze choice
+    float ending_secs = -1;  // its duration; negative = the player's
+    int ending_then = -1;    // fpv_kamikaze_ending_then; -1 = the player's
     int view = 0;          // camera at launch: 0 FPV, 1 chase, 2 line of sight
 };
 Tuning &tuning();

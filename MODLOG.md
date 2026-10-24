@@ -175,3 +175,39 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
   game opened its pause menu on the same press: CGame::Process -> CPad::UpdatePads (0x53BEE6) is redirected and
   clears CPad::NewKeyState.esc (0xB733A8; CMenuManager::CheckForMenuClosing 0x576B70 checks New && !Old) while the
   overlay is open, and until Esc is released.
+- 2026-10-24 (late night): **the pilot stays visible** (user: CJ vanished from his spot while he stood in at the
+  drone). src/pilot.cpp, like sm64ex-fpv's Mario who stays home for his own update/camera/rendering: for the frame's
+  render passes CJ is moved home and shown, then put back at the drone. Idle -> CRenderer::ConstructRenderList
+  (0x53E9F9) swaps him in (matrix pos + bIsVisible, CEntity::UpdateRwMatrix 0x446F90 + UpdateRwFrame 0x532B00); he
+  is still listed in the drone's sector, which is always scanned, so he gets PreRender/shadow/RenderScene at home;
+  Idle -> RenderEffects (0x53EAD3) draws the radio and swaps him back. Bone matrices are **world space** (CPed::
+  GetTransformedBonePosition uses them raw); PreRenderAfterTest sets ped flag 0x474 bit 0x400 + UpdateRpHAnim,
+  CPedIntelligence::ProcessAfterPreRender clears it, so AI bone queries after the swap recompute at the drone.
+  - Pose: no RC-controller model or anim in vanilla ("Zero RC" is Zero's shop; Zero holds a detonator; only
+    CJ_REMOTE, a TV remote). Tried crib.ifp CRIB_Console_Loop (sits), food SHP_Tray_Pose (arms down), cop_ambient
+    Copbrowse_loop; **otb.ifp betslp_loop** (reading a betting slip: head down, both hands at the waist) looks like
+    a pilot. Streamed with CStreaming::RequestModel(25575 + block, keep|priority), CAnimManager::GetAnimation
+    (0x4D42F0), re-blended every drone step with BlendAnimation(clump, hier, started|looped, 4) (0x4D4410: blends
+    other full-body anims out with flag 0x4 = delete when faded). Released when drone::active() goes false:
+    BlendAnimation(clump, ped+0x4D4 motion group, ANIM_ID_IDLE 3, 4) (0x4D4610).
+  - Radio: a procedural low-poly transmitter (body, grips, orange trim, gimbals, sticks, switches, screen,
+    antenna), D3D fixed-function like the drone model, placed between bones 24/25 and 34/35, face toward the neck.
+    No asset files. autotest: `yawdur=<s>` (length of the yaw turn; 1.1 s is about a half turn).
+  - Verified in game (kamikaze libfpv): close-up pose with the radio; from 28 m with the stand-in on, CJ in the pose
+    at his spot (Grove St, day); about 64 m on the LSIA runway a CJ-sized figure at the home spot; wanted=3 with
+    the stand-in on: cop car, cops aiming and firing at the drone, police helicopter's searchlight on it; CJ back in
+    his idle stance after the flight. One hang (main thread spinning in the message loop) after another app took
+    focus mid-test; a restart ran the same test fine.
+- 2026-10-24 (late night): kamikaze ending moved to libfpv's generalized system (F8 > Kamikaze: view SIGNAL_LOST /
+  CUTSCENE, duration 0..30 s, then RESPAWN / RECALL / NOTHING). The mod's own "After the blast" F8 button (action 2)
+  and fpv-data/gtasa-fpv.ini are gone (a saved after_blast=cutscene is moved into libfpv once, then the file is
+  deleted). kamikaze::init calls fpv_kamikaze_set_ending_support (all supported, defaults SIGNAL_LOST / RESPAWN; the
+  function is optional in src/fpvapi.h, older kamikaze DLLs fall back to signal lost 3 s + respawn). Choice read at
+  the detonation; timed with CTimer::m_snTimeInMilliseconds (0xB7CB84, stops in the pause menu). Duration 0 skips
+  the view for RESPAWN/RECALL; NOTHING holds the view whatever the duration. During the view R / F7 / Y (and the
+  F8 Move CJ here button) act at once. Autotest knobs: dur=, then=respawn|recall|nothing, endact=r|y|f7 +
+  endwait=<s>, boomsw=<s>. Verified in game: signal 3 s -> respawn (3.007 s), cutscene dur=0 + nothing held until R
+  at 4 s, signal 2 s -> recall, Y 1.5 s into a 10 s view (CJ on the roof at the blast), F7 2 s into a cutscene,
+  Esc pause mid-view (12.9 s real for a 4 s view), libfpv's values without overrides (cutscene 3 s -> respawn).
+  Seen: a blast at the launch spot (2 m) can kill CJ; the cutscene camera can end up against a wall (1 m clear);
+  the pause menu is hidden under the signal-lost static.

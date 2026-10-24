@@ -7,20 +7,18 @@
 
 namespace kamikaze {
 
-// What the pilot sees after the blast, before control goes back to CJ.
-enum class Ending { SignalLost, Cutscene };
+// What happens after the blast, as the player set it in F8 > Kamikaze.
+struct EndingChoice {
+    uint32_t view = FPV_KAMIKAZE_VIEW_SIGNAL_LOST;  // fpv_kamikaze_ending_view
+    float seconds = 3.0f;                           // 0: no view, the "then" at once
+    uint32_t then = FPV_KAMIKAZE_THEN_RESPAWN;      // fpv_kamikaze_ending_then
+};
 
-// The player's choice (F8 > Fly button), saved in fpv-data/gtasa-fpv.ini.
-Ending ending();
+// Read at the detonation (libfpv's settings.json). Game thread.
+EndingChoice ending_choice();
 
-// How long the ending lasts (F8 > Fly, libfpv's ending_duration), seconds.
-float ending_seconds();
-
-// Once libfpv is loaded: reads the setting and adds the F8 button. Game thread.
+// Once libfpv is loaded: tells libfpv which endings the game offers. Game thread.
 void init();
-
-// Handles a click on an overlay button; false when it is not ours. Game thread.
-bool on_action(uint32_t id);
 
 // The game's explosion at the detonation point. Game thread.
 void explode(const fpv_detonation &d);

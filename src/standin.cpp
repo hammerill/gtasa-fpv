@@ -4,6 +4,7 @@
 
 #include "log.h"
 #include "patch.h"
+#include "pilot.h"
 #include "sa.h"
 
 namespace standin {
@@ -102,6 +103,7 @@ void begin() {
     g_mode = Mode::Body;
     g_placed = {1e9f, 0, 0};
     place(cj);
+    pilot::away(&g_home);  // still drawn at his spot
     fpvlog::write("standin: CJ stands in for the drone, home %.2f %.2f %.2f", g_home.x, g_home.y, g_home.z);
 }
 
@@ -122,6 +124,7 @@ void install_hooks() {
                                                          reinterpret_cast<void *>(&damage_hook)));
     g.process_control =
         patch::replace_pointer(sa::kPlayerPedProcessControlSlot, reinterpret_cast<void *>(&process_control_hook));
+    pilot::install_hooks();
     fpvlog::write("standin: hooks coors %d centre %d/%d damage %d control %08X", g.find_coors != 0,
                   g.find_centre != 0, g.find_centre_no_sniper != 0, g.damage != 0, unsigned(g.process_control));
 }
@@ -138,6 +141,8 @@ void home(float out[3]) {
 
 void update(const float drone_pos[3]) {
     g_drone = {drone_pos[0], drone_pos[1], drone_pos[2]};
+    if (sa::CPed *cj = sa::FindPlayerPed())
+        if (!sa::FindPlayerVehicle()) pilot::hold(cj);
     if (g_mode == Mode::Off) {
         sa::CPed *cj = sa::FindPlayerPed();
         if (cj && dist(cj->position(), g_drone) > kStart) begin();
@@ -155,6 +160,7 @@ void end(bool go_home) {
     if (g_mode == Mode::Off) return;
     Mode mode = g_mode;
     g_mode = Mode::Off;
+    pilot::away(nullptr);
     sa::CPed *cj = sa::FindPlayerPed();
     if (mode != Mode::Body || !cj) return;
     sa::entity_flags(cj) = (sa::entity_flags(cj) & ~(sa::kEntityUsesCollision | sa::kEntityVisible)) |

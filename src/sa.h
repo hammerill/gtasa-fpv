@@ -248,6 +248,9 @@ inline void SetWantedLevel(CPed *player, int level) {
 inline const float *ambient_light_objects() { return reinterpret_cast<const float *>(0xC886C4); }
 inline const float *directional_light() { return reinterpret_cast<const float *>(0xC886B4); }
 
+// CTimer::m_snTimeInMilliseconds: game time, stops while the game is paused.
+inline uint32_t timer_ms() { return *reinterpret_cast<volatile uint32_t *>(0xB7CB84); }
+
 // CClock: the game's time of day.
 inline uint8_t &clock_hours() { return *reinterpret_cast<uint8_t *>(0xB70153); }
 inline uint8_t &clock_minutes() { return *reinterpret_cast<uint8_t *>(0xB70152); }

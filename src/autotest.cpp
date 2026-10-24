@@ -11,9 +11,11 @@
 // wanted=<stars> (CJ's wanted level at the launch), ped=<m> (the nearest ped
 // is put that far ahead of the drone, a target), car=<m> (the same with the
 // nearest car, parked across the path), time=<hour> (time of day), cruise=<s> (stop
-// cruising and hover from then on), pitch=<0..1> (cruise stick, 0.5), yaw=<s> (turn around at that time), kamikaze
+// cruising and hover from then on), pitch=<0..1> (cruise stick, 0.5), yaw=<s> (turn around at that time) for yawdur=<s> (1.5), kamikaze
 // builds: "boom" (bomb arm switch on, then cruise into whatever is ahead),
-// "boomsw" (explode switch at 9 s), "signal" / "cutscene" (ending).
+// "boomsw" (explode switch at 9 s; boomsw=<s> at that time), "signal" / "cutscene" (ending view), dur=<s> (its
+// duration), then=respawn|recall|nothing, endact=r|y|f7 with endwait=<s> (the player's
+// respawn / Move CJ here / exit that long after the blast, game time).
 #include "autotest.h"
 
 #include <windows.h>
@@ -35,7 +37,7 @@ namespace autotest {
 namespace {
 
 struct Config {
-    float secs = 20, height = 0.7f, cruise_until = 1e9f, yaw_at = 1e9f, pitch = 0.5f;
+    float secs = 20, explode_at = 9, height = 0.7f, cruise_until = 1e9f, yaw_at = 1e9f, pitch = 0.5f, yaw_secs = 1.5f;
     bool hover = false, still = false, roll = false, move_cj = false, osd_off = false, bomb = false,
          explode_switch = false;
     std::vector<float> shots;
@@ -43,9 +45,12 @@ struct Config {
     int wanted = -1, hour = -1;
     float ped_at = 0, car_at = 0;
     float at[4] = {};
+    char end_action = 0;  // 'r', 'y' or '7' during a blast's ending
+    float end_action_at = 1;
 };
 Config g_cfg;
 bool g_running = false;
+uint32_t g_blast_ms = 0;  // sa::timer_ms() when the ending began, 0 before
 bool g_waiting = false;  // CJ was moved; the launch follows once the world streamed in
 LARGE_INTEGER g_t0;
 FILETIME g_trigger_time{};
@@ -77,15 +82,19 @@ void read_config() {
     g_cfg.osd_off = std::strstr(buf, "osdoff") != nullptr;
     g_cfg.bomb = std::strstr(buf, "boom") != nullptr;
     g_cfg.explode_switch = std::strstr(buf, "boomsw") != nullptr;
+    if (const char *p = std::strstr(buf, "boomsw=")) g_cfg.explode_at = float(std::atof(p + 7));
     if (const char *p = std::strstr(buf, "secs=")) g_cfg.secs = float(std::atof(p + 5));
     if (const char *p = std::strstr(buf, "height=")) g_cfg.height = float(std::atof(p + 7));
     if (const char *p = std::strstr(buf, "cruise=")) g_cfg.cruise_until = float(std::atof(p + 7));
     if (const char *p = std::strstr(buf, "pitch=")) g_cfg.pitch = float(std::atof(p + 6));
     if (const char *p = std::strstr(buf, "yaw=")) g_cfg.yaw_at = float(std::atof(p + 4));
+    if (const char *p = std::strstr(buf, "yawdur=")) g_cfg.yaw_secs = float(std::atof(p + 7));
     if (const char *p = std::strstr(buf, "ped=")) g_cfg.ped_at = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "car=")) g_cfg.car_at = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "time=")) g_cfg.hour = std::atoi(p + 5);
     if (const char *p = std::strstr(buf, "wanted=")) g_cfg.wanted = std::atoi(p + 7);
+    if (const char *p = std::strstr(buf, "endact=")) g_cfg.end_action = p[7] == 'f' ? '7' : p[7];
+    if (const char *p = std::strstr(buf, "endwait=")) g_cfg.end_action_at = float(std::atof(p + 8));
     if (const char *p = std::strstr(buf, "at="))
         g_cfg.teleport = std::sscanf(p + 3, "%f,%f,%f,%f", &g_cfg.at[0], &g_cfg.at[1], &g_cfg.at[2], &g_cfg.at[3]) == 4;
     if (const char *p = std::strstr(buf, "shots=")) {
@@ -105,6 +114,13 @@ void read_config() {
     if (const char *p = std::strstr(buf, "fov=")) t.fov = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "near=")) t.near_clip = float(std::atof(p + 5));
     if (const char *p = std::strstr(buf, "osd=")) t.osd = std::atoi(p + 4) != 0;
+    if (const char *p = std::strstr(buf, "dur=")) t.ending_secs = float(std::atof(p + 4));
+    if (const char *p = std::strstr(buf, "then=")) {
+        p += 5;
+        t.ending_then = !std::strncmp(p, "recall", 6)    ? FPV_KAMIKAZE_THEN_RECALL
+                        : !std::strncmp(p, "nothing", 7) ? FPV_KAMIKAZE_THEN_NOTHING
+                                                         : FPV_KAMIKAZE_THEN_RESPAWN;
+    }
     t.view = std::strstr(buf, "view=chase") ? 1 : std::strstr(buf, "view=los") ? 2 : 0;
     fpvlog::write("autotest: config '%s' -> %.0f s, %u shots", buf, g_cfg.secs, unsigned(g_cfg.shots.size()));
 }
@@ -139,11 +155,11 @@ void sticks(float t) {
             ch[2] = thr < -0.9f ? -0.9f : thr > 0.3f ? 0.3f : thr;
         }
         if (t > cruise_at && !g_cfg.hover && t < g_cfg.cruise_until) ch[1] = g_cfg.pitch;  // nose down: cruise forward
-        if (t > g_cfg.yaw_at && t < g_cfg.yaw_at + 1.5f) ch[3] = 0.6f;               // yaw right, about a half turn
+        if (t > g_cfg.yaw_at && t < g_cfg.yaw_at + g_cfg.yaw_secs) ch[3] = 0.6f;               // yaw right, about a half turn
         if (g_cfg.roll && t > 6.0f) ch[0] = 0.4f;         // bank right (angle mode holds the tilt)
 #if FPV_CHANNEL_COUNT > 10
         if (g_cfg.bomb && t > 3.5f) ch[10] = 1;            // warhead live 3 s later
-        if (g_cfg.explode_switch && t > 9.0f) ch[11] = 1;  // detonate in the air
+        if (g_cfg.explode_switch && t > g_cfg.explode_at) ch[11] = 1;  // detonate in the air
 #endif
     }
     drone::inject_channels(ch);
@@ -265,6 +281,7 @@ void launch() {
         return;
     }
     g_running = true;
+    g_blast_ms = 0;
     g_hold_z = 0;
     g_next_shot = 0;
     QueryPerformanceCounter(&g_t0);
@@ -307,6 +324,26 @@ void tick() {
         return;
     }
     float t = seconds();
+    if (drone::ending() && !g_blast_ms) {
+        g_blast_ms = sa::timer_ms() ? sa::timer_ms() : 1;
+        fpvlog::write("autotest: blast ending at %.1f s", t);
+    }
+    float since_blast = g_blast_ms ? float(int32_t(sa::timer_ms() - g_blast_ms)) / 1000.0f : 0;
+    if (g_blast_ms && g_cfg.end_action && since_blast >= g_cfg.end_action_at) {
+        char a = g_cfg.end_action;
+        g_cfg.end_action = 0;
+        fpvlog::write("autotest: player action '%c' %.1f s after the blast (ending %s)", a, since_blast,
+                      drone::ending() ? "still on" : "over");
+        if (a == 'r') drone::respawn();
+        else if (a == 'y') drone::move_cj_here();
+        else drone::toggle();
+        if (!drone::active()) {
+            g_running = false;
+            fpvlog::write("autotest: drone gone at %.1f s", t);
+            return;
+        }
+    }
+    if (!drone::ending()) g_blast_ms = 0;  // a new blast may follow a respawn
     sticks(t);
     hold_target();
     if (g_next_shot < g_cfg.shots.size() && t >= g_cfg.shots[g_next_shot]) {

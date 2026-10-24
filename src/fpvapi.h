@@ -16,10 +16,13 @@ namespace fpvapi {
     X(fpv_overlay_render) X(fpv_osd_draw_data) X(fpv_audio_configure) X(fpv_audio_read)          \
     X(fpv_overlay_set_action) X(fpv_overlay_poll_action) X(fpv_gps_set_home)
 
-// Only in libfpv builds with -DLIBFPV_KAMIKAZE=ON; null otherwise.
+// Only in libfpv builds with -DLIBFPV_KAMIKAZE=ON; null otherwise. kamikaze()
+// needs poll_detonation..detonate; fpv_kamikaze_set_ending_support (2026-10)
+// is missing from older kamikaze builds and stays null there.
 #define FPV_KAMIKAZE_FUNCTIONS(X)                                                                \
     X(fpv_kamikaze_poll_detonation) X(fpv_kamikaze_get_state) X(fpv_kamikaze_set_installed)    \
-    X(fpv_kamikaze_get_config) X(fpv_kamikaze_detonate)
+    X(fpv_kamikaze_get_config) X(fpv_kamikaze_detonate) X(fpv_kamikaze_set_config)             \
+    X(fpv_kamikaze_set_ending_support)
 
 struct Api {
 #define FPV_FN(name) decltype(&::name) name = nullptr;

@@ -27,6 +27,9 @@ they do on a real quad.
   streams in, with traffic and pedestrians, wherever you fly. Back within
   10 m of his spot, he is himself again. In a vehicle he stays put; only
   streaming and traffic follow the drone.
+- **The pilot stays visible.** While you fly on foot, CJ stands at his spot
+  in a pilot's pose with a radio transmitter in his hands, and you still see
+  him there when you look back from the drone, however far it is.
 - **Motor sound** from libfpv's synthesizer.
 - **Clean view**: the HUD, radar and radio station name are hidden while you
   fly. Put Betaflight's OSD disable on a switch to hide the OSD, help boxes
@@ -34,10 +37,18 @@ they do on a real quad.
 - **Move CJ here**: ends the flight with CJ standing under the drone (and his
   vehicle with him), facing the way it faced.
 - **Kamikaze** (only with a kamikaze build of libfpv): the drone can carry a
-  warhead (F8 > Fly > Bomb installed). A detonation sets off a grenade-sized
-  explosion. Then the goggles show static with "SIGNAL LOST", or an outside
-  camera shows the blast ("Cutscene", chosen in F8 > Fly), and you control
-  CJ again.
+  warhead (F8 > Kamikaze > Bomb installed). A detonation sets off a
+  grenade-sized explosion. What follows is set in F8 > Kamikaze:
+  - **View**: the goggles show static with "SIGNAL LOST" (default), or an
+    outside camera shows the blast ("Cutscene").
+  - **Duration** of that view in seconds (default 3, game time: it stops while
+    the game is paused). 0 skips the view.
+  - **Then**: respawn the drone at its launch point (default), recall (the
+    flight ends and you control CJ again, as with F7), or nothing (the view
+    stays until you act).
+
+  During the view, R (respawn), F7 (back to CJ) and Y / Move CJ here (CJ
+  goes to the blast site) work at once and replace the "then".
 
 ## Controls
 
@@ -126,7 +137,11 @@ mismatch. The core removes its hooks before it is unloaded.
   `CPlayerPed::ProcessControl` is skipped, and his visible and collision
   flags are cleared every frame. Damage to him is dropped in
   `CPedDamageResponseCalculator::ComputeDamageResponse`. The FindPlayer*
-  position queries return the drone.
+  position queries return the drone. For the frame's render passes
+  (from `CRenderer::ConstructRenderList` to `RenderEffects`) he is put back
+  at his spot and shown, then returned to the drone (`src/pilot.cpp`). The
+  pose is otb.ifp's `betslp_loop` (reading a betting slip); the radio is
+  drawn between his hand bones like the drone model.
 - **Drawing.** The fisheye (a 64x36 warped grid over a copy of the frame),
   the OSD and the overlay are D3D9 fixed-function passes before
   `RwCameraEndUpdate`. The drone model is drawn right after `RenderScene`,
@@ -154,6 +169,9 @@ fullscreen game.
   layouts.
 - [invilso/gta-fpv-drone](https://github.com/invilso/gta-fpv-drone), an
   earlier SA drone, for its lessons.
+- The pilot's radio transmitter is a procedural low-poly model made for
+  this mod (`src/pilot.cpp`, AI-written code, no outside assets); his pose
+  is an animation from the game itself (otb.ifp).
 - Written with Claude (Anthropic).
 
 ## License
