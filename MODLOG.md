@@ -165,3 +165,9 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
 2. Open: interior lower band in FPV; gunfire at the stand-in doesn't reach the drone (CJ has no collision);
    model brightness at night; stand-in with CJ in a vehicle (Queries mode) is untested; first-launch focus loss
    seen once.
+
+- 2026-10-24 (night): user report: the overlay's mouse was unusable, the cursor snapped back to the centre every frame.
+  Cause: Idle (0x53E9F1) calls RsMouseSetPos(screen centre) each frame unless the pause menu is up or the screen is
+  faded out. SA's DirectInput mouse is non-exclusive (diMouseInit 0x7469A0: DISCL_NONEXCLUSIVE|FOREGROUND in game),
+  so the OS cursor moves normally otherwise. Fix: that call is redirected and skipped while the overlay is open (ImGui
+  draws its own cursor). Built and deployed; not yet verified in game.

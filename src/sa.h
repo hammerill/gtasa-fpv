@@ -68,6 +68,9 @@ constexpr CallSite kIdleEndUpdate = {0x53EBF5, 0x7EE180};     // RwCameraEndUpda
 constexpr CallSite kIdleRenderScene = {0x53EABF, 0x53DF40};   // RenderScene()
 constexpr CallSite kIdleHudAfterFade = {0x53EBA2, 0x58D490};  // CHud::DrawAfterFade()
 constexpr CallSite kIdleMessages = {0x53EBA9, 0x69EFC0};      // CMessages::Display(false)
+// RsMouseSetPos(&centre), every frame outside the pause menu (non-exclusive DirectInput mouse,
+// so the OS cursor is what gets pinned).
+constexpr CallSite kIdleMouseSetPos = {0x53E9F1, 0x6194A0};
 // FrontendIdle (0x53E770), the menus.
 constexpr CallSite kFrontendUpdatePads = {0x53E78B, 0x541DD0};  // CPad::UpdatePads()
 constexpr CallSite kFrontendEndUpdate = {0x53E87D, 0x7EE180};
