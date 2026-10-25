@@ -81,12 +81,13 @@ void __attribute__((thiscall)) process_control_hook(sa::CPed *ped) {
 void place(sa::CPed *cj) {
     // Every frame: the game makes the player visible again on its own (camera code).
     sa::entity_flags(cj) &= ~(sa::kEntityUsesCollision | sa::kEntityVisible);
-    if (dist(g_placed, g_drone) > kReplace) {  // new world sector maybe: Remove + Add
-        sa::Teleport(cj, g_drone, false);
-        g_placed = g_drone;
-    } else if (cj->matrix) {
-        cj->matrix->pos = g_drone;
-    }
+    if (!cj->matrix) return;
+    // New world sector maybe: Remove + Add. Not CPed::Teleport, which first
+    // flushes his tasks: that knocked him out of the pilot's pose every 2 m.
+    bool refile = dist(g_placed, g_drone) > kReplace;
+    if (refile) sa::WorldRemove(cj), g_placed = g_drone;
+    cj->matrix->pos = g_drone;
+    if (refile) sa::WorldAdd(cj);
 }
 
 void begin() {

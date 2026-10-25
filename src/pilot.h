@@ -1,5 +1,5 @@
 // CJ at his piloting spot: while the drone flies he stands still in a
-// pilot's pose (otb.ifp's betting-slip anim: head down, both hands in front)
+// pilot's pose (otb.ifp's betting-slip anim: both hands in front; his head and face kept from the idle)
 // holding a radio transmitter, a small procedural model drawn in his hands.
 // While he stands in for the drone (standin.cpp) his real position is at the
 // drone, so for the render passes of each frame he is put back at his spot

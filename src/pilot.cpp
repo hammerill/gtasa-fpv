@@ -61,9 +61,23 @@ inline uint8_t *RpHAnimHierarchyGetMatrixArray(void *hierarchy) {
 inline void *&rw_object(sa::CEntity *e) { return *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(e) + 0x18); }
 inline int motion_group(sa::CPed *p) { return *reinterpret_cast<int *>(reinterpret_cast<uint8_t *>(p) + 0x4D4); }
 
-// ePedBones.
+// RpAnimBlendClumpFindBone: the clump's AnimBlendFrameData (0x18 bytes, flags at +0) for a bone id.
+inline uint8_t *FindBone(void *clump, int bone) {
+    return reinterpret_cast<uint8_t *(__cdecl *)(void *, int)>(0x4D6400)(clump, bone);
+}
+constexpr uint8_t kFrameIgnoreRotation = 0x2;  // the anims leave the bone's rotation as it is
+constexpr uint32_t kEntityOffscreen = 1u << 17;  // its anims update the root only
+
+// ePedBones. The radio's "neck" and "head" points are really the head and the jaw.
 constexpr int kBoneNeck = 5, kBoneHead = 8, kBoneRightHand = 24, kBoneRightFinger = 25, kBoneLeftHand = 34,
               kBoneLeftFinger = 35;
+
+// Bones kept as the idle left them while posed. betslp_loop has no brows,
+// jaw, breasts or belly: once the idle fades out nothing drives them, and the
+// skinned update (0x4D2B90) gives an undriven bone the identity rotation,
+// which is the twisted jaw. The neck and head are the slip reader looking
+// down at his hands; a pilot looks ahead.
+constexpr int kKeptBones[] = {4, 5, 6, 7, 8, 201, 301, 302};
 
 struct Original {
     uintptr_t construct_render_list, render_effects;
@@ -78,6 +92,28 @@ bool g_away = false;  // CJ's real position is at the drone
 sa::CVector g_home{};
 bool g_swapped = false;  // CJ is at home for this frame's render passes
 sa::CVector g_saved_pos{};
+
+void *g_kept_clump = nullptr;
+unsigned g_kept = 0;  // bit i: we flagged kKeptBones[i]
+
+void keep_bones(void *clump) {
+    if (clump != g_kept_clump) g_kept_clump = clump, g_kept = 0;
+    for (int i = 0; i < int(sizeof kKeptBones / sizeof kKeptBones[0]); ++i) {
+        uint8_t *frame = FindBone(clump, kKeptBones[i]);
+        if (!frame || *frame & kFrameIgnoreRotation) continue;
+        *frame |= kFrameIgnoreRotation;
+        g_kept |= 1u << i;
+    }
+}
+
+void free_bones(void *clump) {
+    if (clump && clump == g_kept_clump)
+        for (int i = 0; i < int(sizeof kKeptBones / sizeof kKeptBones[0]); ++i)
+            if (uint8_t *frame = g_kept & 1u << i ? FindBone(clump, kKeptBones[i]) : nullptr)
+                *frame &= ~kFrameIgnoreRotation;
+    g_kept_clump = nullptr;
+    g_kept = 0;
+}
 
 bool load_anim() {
     if (g_anim && block_loaded(g_block)) return true;
@@ -110,6 +146,7 @@ bool load_anim() {
 void release() {
     sa::CPed *cj = g_posed;
     g_posed = nullptr;
+    free_bones(cj && cj == sa::FindPlayerPed() ? rw_object(cj) : nullptr);
     if (!cj || cj != sa::FindPlayerPed() || !rw_object(cj)) return;
     BlendAnimation(rw_object(cj), motion_group(cj), kAnimIdle, 4.0f);  // the pose fades out and is deleted
     fpvlog::write("pilot: pose released");
@@ -124,6 +161,9 @@ void swap_in() {
     sa::entity_flags(cj) |= sa::kEntityVisible;
     UpdateRW(cj);
     UpdateRwFrame(cj);
+    // The skin draws from world-space bone matrices: last computed at the
+    // drone, or not at all on frames his anims skipped, which made him flicker.
+    UpdateRpHAnim(cj);
     g_swapped = true;
 }
 
@@ -133,7 +173,9 @@ void swap_out() {
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj || !cj->matrix) return;
     cj->matrix->pos = g_saved_pos;
-    sa::entity_flags(cj) &= ~sa::kEntityVisible;
+    // The renderer judged him at home, maybe off screen; CEntity::UpdateAnim
+    // then only moves his root. At the drone he is in view: full updates.
+    sa::entity_flags(cj) &= ~(sa::kEntityVisible | kEntityOffscreen);
     UpdateRW(cj);
     UpdateRwFrame(cj);
 }
@@ -334,6 +376,7 @@ void install_hooks() {
 void hold(sa::CPed *cj) {
     swap_out();  // a frame that never reached RenderEffects
     if (!cj || !rw_object(cj) || !load_anim()) return;
+    keep_bones(rw_object(cj));  // before the pose blends in: they keep the idle's rotations
     BlendAnimation(rw_object(cj), g_anim, kAnimStarted | kAnimLooped, 4.0f);
     if (g_posed != cj) fpvlog::write("pilot: CJ in the pilot's pose");
     g_posed = cj;

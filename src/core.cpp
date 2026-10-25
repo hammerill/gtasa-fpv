@@ -20,7 +20,7 @@ namespace {
 // What the redirected calls went to before (the game, or another mod).
 struct Original {
     uintptr_t set_fov, render_scene, idle_end_update, frontend_end_update, hud, radio_name, pickup_text, messages_2d,
-        hud_after_fade, messages_after_fade, mouse_set_pos, update_pads;
+        hud_after_fade, messages_after_fade, mouse_set_pos, update_pads, hide_peds;
     void *release_video_memory;
 };
 Original g;
@@ -95,6 +95,14 @@ int __cdecl release_video_memory_hook() {
 }
 const uint8_t kReleaseVideoMemoryPrologue[] = {0x53, 0x83, 0xC9, 0xFF, 0x33, 0xDB};  // push ebx; or ecx,-1; xor ebx,ebx
 
+// CCamera::ImproveNearClip -> hide the peds near the game's camera. That
+// camera still follows CJ, who stands in at the drone: peds right in front
+// of the lens vanished. The FPV camera has its own near plane.
+bool __cdecl hide_peds_hook(void *a, void *b, void *c) {
+    if (drone::active()) return false;
+    return reinterpret_cast<bool(__cdecl *)(void *, void *, void *)>(g.hide_peds)(a, b, c);
+}
+
 uintptr_t hook_call(const sa::CallSite &at, void *hook) { return patch::redirect_call(at.site, at.fn, hook); }
 
 void install_hooks() {
@@ -110,13 +118,14 @@ void install_hooks() {
     g.messages_after_fade = hook_call(sa::kIdleMessages, reinterpret_cast<void *>(&messages_after_fade_hook));
     g.mouse_set_pos = hook_call(sa::kIdleMouseSetPos, reinterpret_cast<void *>(&mouse_set_pos_hook));
     g.update_pads = hook_call(sa::kGameUpdatePads, reinterpret_cast<void *>(&update_pads_hook));
+    g.hide_peds = hook_call(sa::kNearClipHidePeds, reinterpret_cast<void *>(&hide_peds_hook));
     g.release_video_memory = patch::detour(0x7F7F70, kReleaseVideoMemoryPrologue, sizeof kReleaseVideoMemoryPrologue,
                                            reinterpret_cast<void *>(&release_video_memory_hook));
     standin::install_hooks();
-    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d, text %d %d %d, mouse %d, pads %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
+    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d, text %d %d %d, mouse %d, pads %d, hide peds %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
                   g.idle_end_update != 0, g.frontend_end_update != 0, g.hud != 0, g.radio_name != 0,
                   g.pickup_text != 0, g.messages_2d != 0, g.hud_after_fade != 0, g.messages_after_fade != 0,
-                  g.mouse_set_pos != 0, g.update_pads != 0, g.release_video_memory != nullptr);
+                  g.mouse_set_pos != 0, g.update_pads != 0, g.hide_peds != 0, g.release_video_memory != nullptr);
 }
 
 // The first reading of each key is only a baseline: a key held while the

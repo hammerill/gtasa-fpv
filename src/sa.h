@@ -84,6 +84,9 @@ constexpr CallSite kRender2dMessages = {0x53E515, 0x69EFC0};    // CMessages::Di
 // CCamera::Process (0x52B730): CDraw::SetFOV(fov), right before
 // CalculateDerivedValues (frustum) and CopyCameraMatrixToRWCam.
 constexpr CallSite kCameraSetFov = {0x52C976, 0x6FF410};
+// CCamera::ImproveNearClip: hides the peds close to the game's own camera
+// (they come back next frame), a function the crack moved to .HOODLUM.
+constexpr CallSite kNearClipHidePeds = {0x517115, 0x4154A0};
 
 // Detour targets (function entry, the whole instructions we move, their bytes).
 // FindPlayerCoors(int) returns its CVector through a hidden pointer; the
@@ -227,6 +230,9 @@ inline CVector &turn_speed(CEntity *e) { return *reinterpret_cast<CVector *>(rei
 // Interiors: CGame::currArea and CEntity::m_nAreaCode (0 = outside).
 inline int &current_area() { return *reinterpret_cast<int *>(0xB72914); }
 inline uint8_t &area_of(CEntity *e) { return reinterpret_cast<uint8_t *>(e)[0x2F]; }
+// CWorld::Remove / CWorld::Add: files an entity out of / into the world sectors.
+inline void WorldRemove(CEntity *e) { reinterpret_cast<void(__cdecl *)(CEntity *)>(0x563280)(e); }
+inline void WorldAdd(CEntity *e) { reinterpret_cast<void(__cdecl *)(CEntity *)>(0x563220)(e); }
 inline void RemoveBuildingsNotInArea(int area) { reinterpret_cast<void(__cdecl *)(int)>(0x4094B0)(area); }
 
 // CPed::m_fCurrentRotation / m_fAimingRotation (radians): a ped's heading
