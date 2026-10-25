@@ -171,7 +171,14 @@ void end(bool go_home) {
         return;
     }
     sa::LoadScene(g_home);
-    sa::Teleport(cj, g_home, false);
+    if (cj->matrix) {  // like place(): CPed::Teleport would restart the pose
+        sa::WorldRemove(cj);
+        cj->matrix->pos = g_home;
+        sa::WorldAdd(cj);
+        sa::move_speed(cj) = sa::turn_speed(cj) = {0, 0, 0};
+    } else {
+        sa::Teleport(cj, g_home, false);
+    }
     sa::set_ped_heading(cj, g_home_heading);
     fpvlog::write("standin: over, CJ back at %.2f %.2f %.2f", g_home.x, g_home.y, g_home.z);
 }
