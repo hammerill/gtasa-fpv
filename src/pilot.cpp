@@ -34,6 +34,7 @@ inline const void *block(int index) { return reinterpret_cast<const void *>(0xB5
 
 inline int GetAnimationBlockIndex(const char *name) { return reinterpret_cast<int(__cdecl *)(const char *)>(0x4D3990)(name); }
 inline void RequestModel(int id, int flags) { reinterpret_cast<void(__cdecl *)(int, int)>(0x4087E0)(id, flags); }
+inline void AddAnimBlockRef(int index) { reinterpret_cast<void(__cdecl *)(int)>(0x4D3FB0)(index); }
 inline void *GetAnimation(const char *name, const void *anim_block) {
     return reinterpret_cast<void *(__cdecl *)(const char *, const void *)>(0x4D42F0)(name, anim_block);
 }
@@ -79,7 +80,12 @@ bool g_swapped = false;  // CJ is at home for this frame's render passes
 sa::CVector g_saved_pos{};
 
 bool load_anim() {
-    if (g_anim) return true;
+    if (g_anim && block_loaded(g_block)) return true;
+    if (g_anim) {  // the streaming dropped the block: g_anim points into freed memory
+        fpvlog::write("pilot: anim block %s was unloaded, loading it again", kAnimBlock);
+        g_anim = nullptr;
+        RequestModel(g_block + kIfpStreamingBase, kStreamKeepInMemory | kStreamPriority);
+    }
     if (g_block < 0) {
         g_block = GetAnimationBlockIndex(kAnimBlock);
         if (g_block < 0) {
@@ -93,6 +99,10 @@ bool load_anim() {
     }
     if (!block_loaded(g_block)) return false;  // the streaming loads it within a few frames
     g_anim = GetAnimation(kAnimName, block(g_block));
+    // Our own ref: once the pose fades out nothing else holds the block, and
+    // the streaming frees blocks with no refs (after a death or a long trip),
+    // which left g_anim dangling and froze the game on the next launch.
+    if (g_anim) AddAnimBlockRef(g_block);
     fpvlog::write("pilot: anim %s %s", kAnimName, g_anim ? "loaded" : "missing");
     return g_anim != nullptr;
 }
