@@ -31,6 +31,7 @@ add_library(gtasa_fpv_core SHARED
   src/kamikaze.cpp
   src/render.cpp
   src/pilot.cpp
+  src/sfx.cpp
   src/standin.cpp
   src/world.cpp
   src/log.cpp

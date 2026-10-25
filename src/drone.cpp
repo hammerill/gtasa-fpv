@@ -11,6 +11,7 @@
 #include "log.h"
 #include "render.h"
 #include "sa.h"
+#include "sfx.h"
 #include "standin.h"
 #include "world.h"
 
@@ -29,8 +30,25 @@ using fpvapi::fpv;
 enum class View { Fpv, Chase, Los, Count };
 constexpr uint32_t kMoveCjAction = 1;  // F8 > Fly button id
 
+// Where a flight happens. Live: the game as usual. Frozen: the world is on
+// hold (a freeze mod such as Amazing Screenshot's Alt+V, or a script's
+// set_gamespeed 0). Replay: a replay plays back (F1, F3). Launched in the last
+// two, the drone only watches: it starts under the game's camera, CJ is left
+// alone, and the flight ends when that scene does.
+enum class Scene { Live, Frozen, Replay };
+Scene scene_now() {
+    if (sa::replay_playing()) return Scene::Replay;
+    if (sa::user_paused() || sa::time_scale() < 0.01f) return Scene::Frozen;
+    return Scene::Live;
+}
+const char *scene_name(Scene s) { return s == Scene::Replay ? "replay" : s == Scene::Frozen ? "frozen world" : "live"; }
+
 fpv_drone *g_drone = nullptr;
+Scene g_launch_scene = Scene::Live;
+float g_pilot_pos[3];       // a watching flight's pilot and home: the camera at launch
+float g_fov_before = 70.0f;  // CDraw's FOV at launch, given back after a watching flight
 View g_view = View::Fpv;
+bool g_stepped = false;  // camera() ran this frame (inside CCamera::Process)
 float g_spawn_pos[3];
 float g_spawn_rot[4];
 LARGE_INTEGER g_last_tick;
@@ -59,17 +77,33 @@ float g_fov_passed = 0;      // what we gave SetFOV this frame, degrees
 // Kamikaze builds: after the warhead went off, static in the goggles or an
 // outside shot of the blast for a while (F8 > Kamikaze), then a respawn, back
 // to CJ, or nothing (the view stays until the player acts). Timed with the
-// game's clock, so a paused game pauses it too.
+// game's clock, so a paused game pauses it too; while the world is on hold
+// (frozen, replay) that clock stops or jumps, so real time counts there.
 struct Ending {
     bool on = false;
     bool shown = false;     // the view is up (false: duration 0, straight to "then")
     bool cutscene = false;  // the view is the outside shot (else signal lost)
     bool timed = false;     // false: held until the player respawns, recalls or moves CJ
     uint32_t then = FPV_KAMIKAZE_THEN_RESPAWN;
-    uint32_t end_ms = 0;  // sa::timer_ms() when "then" happens
+    uint32_t end_ms = 0;  // g_clock_ms when "then" happens
     View view_before = View::Fpv;  // the camera to go back to after a respawn
 };
 Ending g_ending;
+
+uint32_t g_clock_ms = 0;  // the ending's clock
+uint32_t g_clock_game = 0;
+DWORD g_clock_real = 0;
+
+bool watching() { return g_launch_scene != Scene::Live; }
+bool world_on_hold() { return scene_now() != Scene::Live; }
+
+void advance_clock() {
+    uint32_t game = sa::timer_ms();
+    DWORD real = GetTickCount(), real_step = real - g_clock_real;
+    g_clock_ms += world_on_hold() ? (real_step > 100 ? 100 : real_step) : game - g_clock_game;
+    g_clock_game = game;
+    g_clock_real = real;
+}
 
 void print(const char *text) { sa::SetHelpMessage(text); }
 
@@ -120,6 +154,7 @@ bool key_pressed(int vk) {
 // CJ can't move while we fly, or while the overlay takes the keyboard. We own
 // one bit of CPad::DisablePlayerControls, so scripts' own bits are untouched.
 void hold_cj(bool hold) {
+    if (sa::replay_playing()) hold = false;  // the bit would end the replay (CReplay::Init)
     uint16_t &bits = sa::pad_disabled_controls();
     bits = hold ? uint16_t(bits | sa::kPadDisabledByFpv) : uint16_t(bits & ~sa::kPadDisabledByFpv);
 }
@@ -204,7 +239,10 @@ void aim_camera(const float from[3], const float at[3], float fov) {
 // (his own spot while he stands in for the drone).
 void update_home() {
     float home[3];
-    standin::home(home);
+    if (watching())
+        for (int i = 0; i < 3; ++i) home[i] = g_pilot_pos[i];
+    else
+        standin::home(home);
     fpv.fpv_gps_set_home(home);
 }
 
@@ -213,22 +251,27 @@ void start() {
         print("FPV: libfpv failed to load, see GTASA.FPV.log");
         return;
     }
+    Scene scene = scene_now();
     sa::CPed *cj = sa::FindPlayerPed();
-    if (!cj || !cj->matrix) return;
-    sa::CVehicle *car = sa::FindPlayerVehicle();
-    const sa::CMatrix &m = car && car->matrix ? *car->matrix : *cj->matrix;
-    sa::CVector p = cj->position();
+    if (scene == Scene::Live && (!cj || !cj->matrix)) {
+        sfx::play(sa::kSoundError);
+        return;
+    }
+    sa::CVehicle *car = scene == Scene::Live ? sa::FindPlayerVehicle() : nullptr;
+    // Live: in front of CJ (or his vehicle), resting on the ground. Watching:
+    // on the ground a little ahead of the game's camera, wherever it is (in
+    // the air where there is none), with the camera as the pilot.
+    const sa::CMatrix &m = scene != Scene::Live ? sa::camera_matrix() : car && car->matrix ? *car->matrix : *cj->matrix;
+    sa::CVector p = scene != Scene::Live ? m.pos : cj->position();
     float h = heading_of(m.forward);
-
-    // In front of CJ (or his vehicle), resting on the ground.
     float ahead = car ? 4.0f : 2.0f;
     g_spawn_pos[0] = p.x - std::sin(h) * ahead;
     g_spawn_pos[1] = p.y + std::cos(h) * ahead;
-    float origin[3] = {g_spawn_pos[0], g_spawn_pos[1], p.z + 1.0f}, down[3] = {0, 0, -1};
+    float origin[3] = {g_spawn_pos[0], g_spawn_pos[1], scene != Scene::Live ? p.z : p.z + 1.0f}, down[3] = {0, 0, -1};
     fpv_raycast_hit hit{};
-    world::ignore(cj);
-    bool ground = world::raycast(nullptr, origin, down, 5.0f, &hit) != 0;
-    g_spawn_pos[2] = ground ? origin[2] - hit.distance : p.z - 1.0f;
+    world::ignore(scene == Scene::Live ? cj : nullptr);
+    bool ground = world::raycast(nullptr, origin, down, scene != Scene::Live ? 300.0f : 5.0f, &hit) != 0;
+    g_spawn_pos[2] = ground ? origin[2] - hit.distance : scene != Scene::Live ? p.z : p.z - 1.0f;
     g_spawn_rot[0] = 0;
     g_spawn_rot[1] = 0;
     g_spawn_rot[2] = std::sin(h / 2);
@@ -245,9 +288,15 @@ void start() {
     if (r != FPV_OK) {
         fpvlog::write("fpv_drone_create: %s (%s)", fpv.fpv_result_string(r), fpv.fpv_last_error());
         print("FPV: drone creation failed, see GTASA.FPV.log");
+        sfx::play(sa::kSoundError);
         g_drone = nullptr;
         return;
     }
+    g_launch_scene = scene;
+    g_pilot_pos[0] = p.x, g_pilot_pos[1] = p.y, g_pilot_pos[2] = p.z;
+    g_fov_before = sa::draw_fov();
+    g_clock_game = sa::timer_ms();
+    g_clock_real = GetTickCount();
     fpv.fpv_world_set_raycast_callback(&world::raycast, nullptr);
     if (fpvapi::kamikaze()) {  // detonations of earlier drones are history
         fpv_detonation d;
@@ -264,14 +313,16 @@ void start() {
     g_shot.on = false;
     g_view = View(tuning().view % int(View::Count));
     audio::start();
-    fpv.fpv_overlay_set_action(kMoveCjAction, "Move CJ here (Y)");
+    if (!watching()) fpv.fpv_overlay_set_action(kMoveCjAction, "Move CJ here (Y)");
+    sfx::play(sa::kSoundSelect);
 
     fpv_input_status st{};
     st.struct_size = sizeof st;
     fpv.fpv_input_get_status(&st);
-    fpvlog::write("drone launched at %.2f %.2f %.2f heading %.1f (ground %s, %s), input %d '%s'%s", g_spawn_pos[0],
-                  g_spawn_pos[1], g_spawn_pos[2], h * kRadToDeg, ground ? "hit" : "missed", car ? "in a vehicle" : "on foot",
-                  int(st.source), st.device_name, st.needs_setup ? " (needs setup)" : "");
+    fpvlog::write("drone launched at %.2f %.2f %.2f heading %.1f (ground %s, %s, %s), input %d '%s'%s", g_spawn_pos[0],
+                  g_spawn_pos[1], g_spawn_pos[2], h * kRadToDeg, ground ? "hit" : "missed", scene_name(scene),
+                  watching() ? "under the camera" : car ? "in a vehicle" : "on foot", int(st.source), st.device_name,
+                  st.needs_setup ? " (needs setup)" : "");
 }
 
 void stop(bool go_home = true) {
@@ -289,6 +340,9 @@ void stop(bool go_home = true) {
     g_ending = Ending{};
     g_osd_visible = false;
     g_osd_no_signal = false;
+    // Nothing else sets the FOV again while the world is on hold.
+    if (scene_now() != Scene::Live) sa::SetFOV(g_fov_before);
+    g_launch_scene = Scene::Live;
     fpvlog::write("drone stopped");
 }
 
@@ -348,7 +402,7 @@ void begin_ending(const fpv_detonation &d) {
     // "Nothing" keeps the view up whatever the duration: there is nothing else to show.
     g_ending.shown = e.seconds > 0 || e.then == FPV_KAMIKAZE_THEN_NOTHING;
     g_ending.timed = e.then != FPV_KAMIKAZE_THEN_NOTHING;
-    g_ending.end_ms = sa::timer_ms() + (e.seconds > 0 ? uint32_t(e.seconds * 1000.0f) : 0);
+    g_ending.end_ms = g_clock_ms + (e.seconds > 0 ? uint32_t(e.seconds * 1000.0f) : 0);
     g_ending.cutscene = g_ending.shown && e.view == FPV_KAMIKAZE_VIEW_CUTSCENE;
     fpvlog::write("kamikaze: ending: %s%s, then %s", !g_ending.shown ? "no view" : g_ending.cutscene ? "cutscene" : "signal lost",
                   g_ending.timed && g_ending.shown ? "" : g_ending.shown ? " until the player acts" : "", then_name(e.then));
@@ -407,13 +461,16 @@ void step() {
     if (frame.sim_time < g_first_sim_time + 0.05) return;
     g_frame = frame;
     g_have_frame = true;
-    standin::update(frame.position);
+    if (!watching()) standin::update(frame.position);
     update_home();
     if (fpvapi::kamikaze()) {
         fpv_detonation d;
         d.struct_size = sizeof d;
         while (fpv.fpv_kamikaze_poll_detonation(&d)) {
-            kamikaze::explode(d);
+            if (world_on_hold())  // nothing would move it: no fireball, no damage when the world goes on
+                fpvlog::write("kamikaze: detonation with the world on hold (%s), no explosion", scene_name(scene_now()));
+            else
+                kamikaze::explode(d);
             if (!g_ending.on) begin_ending(d);
         }
     }
@@ -429,7 +486,8 @@ void step() {
                       im.position[0], im.position[1], im.position[2], im.normal[0], im.normal[1], im.normal[2], im.speed,
                       im.impulse, int(im.motor_index), im.object_id);
     }
-    effects::on_frame(frame);
+    if (!world_on_hold()) effects::on_frame(frame);  // frozen or replayed peds and cars can't react
+    sfx::on_frame(frame);
 
     // Sparse trace for debugging the axes and the camera mapping.
     static float log_timer = 0;
@@ -470,6 +528,10 @@ bool hide_text() { return g_drone && g_have_frame && (g_frame.flags & FPV_DRONE_
 
 // CJ faces the drone's heading. In a vehicle, the vehicle goes with him.
 void move_cj_here() {
+    if (watching()) {  // CJ is part of the frozen or replayed scene
+        sfx::play(sa::kSoundError);
+        return;
+    }
     float pos[3] = {g_frame.position[0], g_frame.position[1], g_frame.position[2]};
     const float *f = g_frame.camera.forward;
     float heading = (f[0] * f[0] + f[1] * f[1] > 1e-6f) ? std::atan2(-f[0], f[1]) : 0;
@@ -490,6 +552,7 @@ void move_cj_here() {
         sa::SetHeading(car, heading);
     else
         sa::set_ped_heading(cj, heading);
+    sfx::play(sa::kSoundSelect);
     fpvlog::write("moved CJ%s to the drone: %.2f %.2f %.2f (ground %s) heading %.1f", car ? " and his vehicle" : "",
                   pos[0], pos[1], z, ground ? "hit" : "missed", heading * kRadToDeg);
 }
@@ -546,10 +609,12 @@ bool osd_frame(fpv_frame *out, bool *no_signal) {
 }
 
 void toggle() {
-    if (active())
+    if (active()) {
         stop();
-    else
+        sfx::play(sa::kSoundBack);
+    } else {
         start();
+    }
 }
 
 void shutdown() {
@@ -558,7 +623,7 @@ void shutdown() {
 }
 
 float camera(float game_fov) {
-    if (g_drone) step();
+    if (g_drone) step(), g_stepped = true;
     if (!g_drone || !g_shot.on) return game_fov;
     sa::CMatrix &m = sa::camera_matrix();
     // The game's camera "right" is up x forward, i.e. screen left (measured).
@@ -570,6 +635,22 @@ float camera(float game_fov) {
     float t = std::tan(g_shot.fov * 0.5f / kRadToDeg) / g_fov_scale;
     g_fov_passed = 2 * std::atan(t) * kRadToDeg;
     return g_fov_passed;
+}
+
+// Frames where CCamera::Process didn't give us the camera: a replay plays
+// (CReplay::ProcessReplayCamera instead) or a freeze mod skips its SetFOV.
+// Called after CGame::Process, before the frame is drawn: the same steps.
+void camera_outside_process() {
+    float fov = camera(sa::draw_fov());
+    if (!g_shot.on) return;
+    sa::SetFOV(fov);
+    sa::CalculateDerivedValues(false, true);
+    sa::CopyCameraMatrixToRWCam(false);
+    static Scene reported = Scene::Live;
+    if (scene_now() != reported) {
+        reported = scene_now();
+        fpvlog::write("camera: applied outside CCamera::Process (%s)", scene_name(reported));
+    }
 }
 
 void observe_view_window(float tan_half_y) {
@@ -607,9 +688,17 @@ void tick() {
     bool move_cj = false;  // F8 buttons work on foot too, but Move CJ here only in flight
     for (uint32_t id; (id = fpv.fpv_overlay_poll_action()) != 0;) move_cj |= id == kMoveCjAction;
     if (!g_drone) return;
+    advance_clock();
 
+    Scene scene = scene_now();
+    if (watching() && scene != g_launch_scene) {  // the replay ended, the world goes on (or froze in a replay)
+        fpvlog::write("%s over, drone stopped", scene_name(g_launch_scene));
+        stop(false);
+        sfx::play(sa::kSoundBack);
+        return;
+    }
     sa::CPed *cj = sa::FindPlayerPed();
-    if (!cj || sa::ped_health(cj) <= 0) {  // flew the warhead into himself: the game takes over
+    if (!watching() && (!cj || sa::ped_health(cj) <= 0)) {  // flew the warhead into himself: the game takes over
         fpvlog::write("CJ died, drone stopped");
         stop();
         return;
@@ -619,10 +708,13 @@ void tick() {
     bool camera_key = key_pressed('C'), reset_key = key_pressed('R'), cj_key = key_pressed('Y');
     if (!fpv.fpv_overlay_wants_input()) {  // otherwise the keys belong to the overlay
         move_cj |= cj_key;
-        if (camera_key && !g_ending.on) g_view = View((int(g_view) + 1) % int(View::Count));
+        if (camera_key && !g_ending.on) {
+            g_view = View((int(g_view) + 1) % int(View::Count));
+            sfx::play(sa::kSoundHighlight);
+        }
         if (reset_key) respawn();
     }
-    if (g_ending.on && !move_cj && g_ending.timed && int32_t(sa::timer_ms() - g_ending.end_ms) >= 0) {
+    if (g_ending.on && !move_cj && g_ending.timed && int32_t(g_clock_ms - g_ending.end_ms) >= 0) {
         fpvlog::write("kamikaze: ending over, %s", then_name(g_ending.then));
         if (g_ending.then == FPV_KAMIKAZE_THEN_RECALL) {
             stop();  // as F7: CJ back in control where he stood
@@ -630,9 +722,11 @@ void tick() {
         }
         respawn_drone();
     }
-    if (g_ending.on && move_cj) fpvlog::write("kamikaze: ending cut short: Move CJ here");
+    if (g_ending.on && move_cj && !watching()) fpvlog::write("kamikaze: ending cut short: Move CJ here");
     hold_cj(true);  // scripts may have cleared the pad's state (cutscenes, missions)
     if (move_cj && g_have_frame) move_cj_here();
+    if (g_drone && !g_stepped) camera_outside_process();
+    g_stepped = false;
 }
 
 }  // namespace drone

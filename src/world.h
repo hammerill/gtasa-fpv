@@ -21,8 +21,9 @@ void ignore(sa::CEntity *entity);
 // fpv_raycast_fn. Game thread only (it is called inside fpv_drone_tick).
 int raycast(void *user, const float origin[3], const float dir[3], float max_distance, fpv_raycast_hit *hit);
 
-// The same probe, also returning the entity that was hit (may be null).
+// The same probe, also returning the entity that was hit (may be null) and
+// its surface type (surfinfo.dat).
 bool probe(const float origin[3], const float dir[3], float max_distance, fpv_raycast_hit *hit,
-           sa::CEntity **entity);
+           sa::CEntity **entity, uint8_t *surface = nullptr);
 
 }  // namespace world

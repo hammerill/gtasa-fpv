@@ -211,3 +211,20 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
   Esc pause mid-view (12.9 s real for a 4 s view), libfpv's values without overrides (cutscene 3 s -> respawn).
   Seen: a blast at the launch spot (2 m) can kill CJ; the cutscene camera can end up against a wall (1 m clear);
   the pause menu is hidden under the signal-lost static.
+
+- 2026-10-25: watching flights, frozen world and replays; sound reactions (built, **not yet tested in game**).
+  - Replay: CReplay::Update 0x460500 reads rsF1/F2/F3 (1001-1003) via GetIsKeyboardKeyJustDown: F1 plays the
+    buffer (TriggerPlayback), F2 saves it, F3 plays it from disk (PlayReplayFromHD); CReplay::Mode 0xA43088 (1 =
+    playback). It calls CReplay::Init on any frame with CPad::DisablePlayerControls set, so our pad bit is never set
+    during playback (it would drop the replay), and no replay can start during a normal flight. During playback
+    CGame::Process calls CCamera::ProcessFade instead of CCamera::Process (ShouldStandardCameraBeProcessed 0x45C440),
+    so the SetFOV hook doesn't run: drone::tick applies the camera itself after CGame::Process (SetFOV, then
+    CalculateDerivedValues(false, true) 0x5150E0 and CopyCameraMatrixToRWCam(false) 0x50AFA0, as Process does).
+  - Amazing Screenshot 1.2 (cleo/Amazingscreen.cs, Alt+V): CTimer::StartUserPause (m_UserPause 0xB7CB49) with the
+    user-pause check in CGame::Process nopped (0x53BF8A/0x53BF96), so the world block runs with no time step, and
+    `jmp` over CCamera::Process's SetFOV call (0x52C971): same fallback camera. Frozen is detected from the game
+    (m_UserPause or ms_fTimeScale 0xB7CB64 < 0.01), not from the mod.
+  - Sounds: CAudioEngine (AudioEngine 0xB6BC90) ReportFrontendAudioEvent 0x506EA0 (event, dB, speed); events seen in
+    CMenuManager: 1 select, 2 back, 3 highlight, 4 error. ReportCollision 0x506EB0 called as
+    CPhysical::ApplyCollision 0x5435C0 does (a, b, surfaces, point, normal, impulse/mass, 1, one-shot); a must be
+    non-null (types are read). Drone = surface 68 PLASTIC.

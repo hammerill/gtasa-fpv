@@ -34,8 +34,22 @@ they do on a real quad.
 - **Clean view**: the HUD, radar and radio station name are hidden while you
   fly. Put Betaflight's OSD disable on a switch to hide the OSD, help boxes
   and subtitles too, for recording.
+- **Sound reactions** in the game's own sounds: a menu click when the drone
+  launches or CJ moves to it, the back sound on recall, a tick on a camera
+  switch, the error buzz when something can't be done, and a collision sound
+  (by the surface hit) on impacts from 3 m/s.
 - **Move CJ here**: ends the flight with CJ standing under the drone (and his
   vehicle with him), facing the way it faced.
+- **Fly through a replay or a frozen world.** Press F7 while a replay plays
+  (F1: the last seconds, F3: the one saved with F2), or while the world is on
+  hold (Amazing Screenshot's Alt+V, or any mod or script that pauses the game
+  or sets its speed to 0). The drone starts on the ground just ahead of the
+  game's camera, and the camera is the pilot (home point, link range). It
+  only watches: CJ is left where he is, nobody reacts to hits, a warhead
+  makes no explosion, and Move CJ here is refused. The flight ends with the
+  replay or the freeze. Without such a mod the drone works as usual; a
+  flight started in the normal game keeps going if the world is frozen
+  mid-flight (hits and blasts do nothing to the world while it's frozen).
 - **Kamikaze** (only with a kamikaze build of libfpv): the drone can carry a
   warhead (F8 > Kamikaze > Bomb installed). A detonation sets off a
   grenade-sized explosion. What follows is set in F8 > Kamikaze:

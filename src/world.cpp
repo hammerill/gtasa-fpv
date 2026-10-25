@@ -25,7 +25,7 @@ uint32_t classify(sa::CEntity *e) {
 void ignore(sa::CEntity *entity) { g_ignore = entity; }
 
 bool probe(const float origin[3], const float dir[3], float max_distance, fpv_raycast_hit *hit,
-           sa::CEntity **entity_out) {
+           sa::CEntity **entity_out, uint8_t *surface_out) {
     sa::CVector from{origin[0], origin[1], origin[2]};
     sa::CVector to{origin[0] + dir[0] * max_distance, origin[1] + dir[1] * max_distance,
                    origin[2] + dir[2] * max_distance};
@@ -58,6 +58,7 @@ bool probe(const float origin[3], const float dir[3], float max_distance, fpv_ra
     hit->material = 0;
     hit->object_id = classify(entity);
     if (entity_out) *entity_out = entity;
+    if (surface_out) *surface_out = cp.surface_b;
 
     static sa::CEntity *last_entity = nullptr;
     static int traced = 0;

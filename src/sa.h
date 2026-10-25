@@ -257,6 +257,47 @@ inline const float *directional_light() { return reinterpret_cast<const float *>
 // CTimer::m_snTimeInMilliseconds: game time, stops while the game is paused.
 inline uint32_t timer_ms() { return *reinterpret_cast<volatile uint32_t *>(0xB7CB84); }
 
+// CTimer::m_UserPause (also what freeze-the-world mods such as Amazing
+// Screenshot's Alt+V set) and CTimer::ms_fTimeScale (the script's set_gamespeed).
+inline bool user_paused() { return *reinterpret_cast<volatile uint8_t *>(0xB7CB49) != 0; }
+inline float time_scale() { return *reinterpret_cast<volatile float *>(0xB7CB64); }
+
+// CReplay::Mode: 1 while a replay plays back (F1: the last seconds, F3: the
+// one saved with F2). CReplay::Update calls CReplay::Init (the buffer and the
+// playback are dropped) on every frame with CPad::DisablePlayerControls set.
+inline bool replay_playing() { return *reinterpret_cast<volatile uint8_t *>(0xA43088) == 1; }
+
+// CDraw::ms_fFOV, what CDraw::SetFOV was last given.
+inline float draw_fov() { return *reinterpret_cast<float *>(0x8D5038); }
+inline void SetFOV(float fov) { reinterpret_cast<void(__cdecl *)(float)>(0x6FF410)(fov); }
+// What CCamera::Process does right after SetFOV (with false, true and false),
+// for frames where it doesn't run (replays: CReplay::ProcessReplayCamera
+// instead) or skips SetFOV (Amazing Screenshot jumps over the call).
+inline void CalculateDerivedValues(bool a, bool b) {
+    reinterpret_cast<void(__attribute__((thiscall)) *)(uintptr_t, bool, bool)>(0x5150E0)(kTheCamera, a, b);
+}
+inline void CopyCameraMatrixToRWCam(bool a) {
+    reinterpret_cast<void(__attribute__((thiscall)) *)(uintptr_t, bool)>(0x50AFA0)(kTheCamera, a);
+}
+
+// The game's own sounds. Frontend events as the menus use them (volume in dB, speed 1).
+constexpr uintptr_t kAudioEngine = 0xB6BC90;
+enum FrontendSound { kSoundSelect = 1, kSoundBack = 2, kSoundHighlight = 3, kSoundError = 4 };
+inline void ReportFrontendAudioEvent(int event, float volume_db = 0, float speed = 1) {
+    reinterpret_cast<void(__attribute__((thiscall)) *)(uintptr_t, int, float, float)>(0x506EA0)(kAudioEngine, event,
+                                                                                               volume_db, speed);
+}
+// CAudioEngine::ReportCollision, as CPhysical::ApplyCollision calls it: the
+// two entities (a never null), their surfaces, the point, the normal (may be
+// null), the speed change in metres per 1/50 s, 1, one-shot.
+inline void ReportCollision(CEntity *a, CEntity *b, uint8_t surface_a, uint8_t surface_b, CVector &at,
+                            CVector *normal, float impact, float volume, bool one_shot) {
+    using Fn = void(__attribute__((thiscall)) *)(uintptr_t, CEntity *, CEntity *, int, int, CVector &, CVector *, float,
+                                                 float, int, int);
+    reinterpret_cast<Fn>(0x506EB0)(kAudioEngine, a, b, surface_a, surface_b, at, normal, impact, volume, one_shot, 0);
+}
+constexpr uint8_t kSurfacePlastic = 68;  // data/surfinfo.dat
+
 // CClock: the game's time of day.
 inline uint8_t &clock_hours() { return *reinterpret_cast<uint8_t *>(0xB70153); }
 inline uint8_t &clock_minutes() { return *reinterpret_cast<uint8_t *>(0xB70152); }
