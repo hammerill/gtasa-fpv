@@ -50,9 +50,9 @@ they do on a real quad.
   replay or the freeze. Without such a mod the drone works as usual; a
   flight started in the normal game keeps going if the world is frozen
   mid-flight (hits and blasts do nothing to the world while it's frozen).
-- **Kamikaze** (only with a kamikaze build of libfpv): the drone can carry a
-  warhead (F8 > Kamikaze > Bomb installed). A detonation sets off a
-  grenade-sized explosion. What follows is set in F8 > Kamikaze:
+- **Kamikaze** (needs a kamikaze build of libfpv, which releases ship): the
+  drone can carry a warhead (F8 > Kamikaze > Bomb installed). A detonation
+  sets off a grenade-sized explosion. What follows is set in F8 > Kamikaze:
   - **View**: the goggles show static with "SIGNAL LOST" (default), or an
     outside camera shows the blast ("Cutscene").
   - **Duration** of that view in seconds (default 3, game time: it stops while
@@ -96,7 +96,8 @@ Adjuster). The mod chains onto the hooks those mods already placed.
 
 Players: see [docs/INSTALL.md](docs/INSTALL.md), which is also the text of
 every release. Every push to `main` builds a release
-(`.github/workflows/release.yml`) with the latest libfpv.
+(`.github/workflows/release.yml`) with the latest libfpv, built with
+`-DLIBFPV_KAMIKAZE=ON`.
 
 | File | What it is |
 |---|---|

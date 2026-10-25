@@ -1,13 +1,13 @@
-# Every push to main builds the mod and the latest libfpv for 32-bit Windows
-# and publishes gtasa-fpv.zip as a new GitHub release. The ZIP's contents go
-# straight into the game's modloader folder; docs/INSTALL.md becomes the release page.
+# Every push to main builds the mod and the latest libfpv (a kamikaze build,
+# so the warhead is available) for 32-bit Windows and publishes gtasa-fpv.zip
+# as a new GitHub release. The ZIP's contents go straight into the game's
+# modloader folder; docs/INSTALL.md becomes the release page.
 # Run it by hand (Actions > Release > Run workflow) to pick up a new libfpv.
 name: Release
 
-# Temporarily manual only: re-enable the push trigger below to release on every push.
 on:
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -38,12 +38,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gcc-mingw-w64-i686-posix g++-mingw-w64-i686-posix zip
 
-      - name: Build libfpv (i686)
+      - name: Build libfpv (i686, kamikaze)
         run: |
           cmake -S libfpv -B libfpv/build/win32 \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/libfpv/cmake/toolchains/mingw-w64-i686.cmake" \
-            -DLIBFPV_BUILD_TESTS=OFF -DLIBFPV_BUILD_EXAMPLES=OFF
+            -DLIBFPV_BUILD_TESTS=OFF -DLIBFPV_BUILD_EXAMPLES=OFF -DLIBFPV_KAMIKAZE=ON
           cmake --build libfpv/build/win32 -j"$(nproc)"
+          # The mod enables kamikaze only if the DLL exports its API (src/fpvapi.cpp).
+          i686-w64-mingw32-objdump -p libfpv/build/win32/libfpv.dll | grep -q fpv_kamikaze \
+            || { echo "libfpv.dll has no kamikaze exports"; exit 1; }
 
       - name: Build the mod
         run: |
@@ -73,7 +76,7 @@ jobs:
             echo "## This build"
             echo
             echo "- gtasa-fpv [\`${mod_sha:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${mod_sha}): $(git -C gtasa-fpv log -1 --format=%s)"
-            echo "- libfpv [\`${lib_sha:0:7}\`](https://github.com/hammerill/libfpv/commit/${lib_sha}) (source of \`libfpv.dll\`, GPL-3.0-or-later)"
+            echo "- libfpv [\`${lib_sha:0:7}\`](https://github.com/hammerill/libfpv/commit/${lib_sha}) (source of \`libfpv.dll\`, kamikaze build, GPL-3.0-or-later)"
           } > dist/notes.md
           tag="build-${GITHUB_RUN_NUMBER}"
           gh release create "$tag" dist/gtasa-fpv.zip \
