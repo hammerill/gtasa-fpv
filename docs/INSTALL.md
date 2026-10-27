@@ -55,10 +55,6 @@ Start the game, load a save and press **F7**. CJ launches the drone.
   are pitch and roll.
 - **Gamepad:** works too.
 
-**Kamikaze:** the drone can carry a warhead. Install it in F8 > Kamikaze,
-then K toggles the bomb arm switch and holding X explodes (on a radio, the
-Kamikaze tab has its own setup for both switches).
-
 Fly more than 20 m away and the world treats the drone as CJ: gangs, peds
 and police react to it, and the city streams in around it.
 

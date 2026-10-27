@@ -52,18 +52,6 @@ they do on a real quad.
   replay or the freeze. Without such a mod the drone works as usual; a
   flight started in the normal game keeps going if the world is frozen
   mid-flight (hits and blasts do nothing to the world while it's frozen).
-- **Kamikaze** (needs a kamikaze build of libfpv, which releases ship): the
-  drone can carry a warhead (F8 > Kamikaze > Bomb installed). A detonation
-  sets off a grenade-sized explosion. What follows is set in F8 > Kamikaze:
-  - **View**: the goggles show static with "SIGNAL LOST" (default), or an
-    outside camera shows the blast ("Cutscene").
-  - **Duration** of that view in seconds (default 3, game time: it stops while
-    the game is paused). 0 skips the view.
-  - **Then**: respawn the drone at its launch point (default), recall (the
-    flight ends and you control CJ again, as with F7), or nothing (the view
-    stays until you act).
-
-  During the view, R (respawn), F7 (back to CJ) and Y / Move CJ here (CJ
   goes to the blast site) work at once and replace the "then".
 
 ## Controls
