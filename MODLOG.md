@@ -228,3 +228,32 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
     CMenuManager: 1 select, 2 back, 3 highlight, 4 error. ReportCollision 0x506EB0 called as
     CPhysical::ApplyCollision 0x5435C0 does (a, b, surfaces, point, normal, impulse/mass, 1, one-shot); a must be
     non-null (types are read). Drone = surface 68 PLASTIC.
+
+- 2026-10-31: **wind** (libfpv `fpv_wind_*`, DECISIONS D30; built, **not yet tested in game**: the session was locked,
+  so no input reached the game, and SA pauses without focus).
+  - Weather: CWeather::Wind 0xC812F0 (0..0.25 sunny, 0.7 cloudy, 1.0 rainy SF/countryside, 1.5 sandstorm; table
+    0x8D5E50) and WindDir 0xC813E0 (= WindClipped·0.7 per axis plus table wobble: always towards +X +Y, i.e.
+    north-east; scripted 1 s / 2 s / 256 ms modulation). Checked the stores in CWeather::Update at 0x72C3C2/0x72C40C.
+    src/wind.cpp low-passes WindDir over 4 s for the direction and passes Wind × 11 m/s (1.0 = a storm) to
+    fpv_wind_set; interiors (CGame::currArea != 0) get FPV_WIND_ENCLOSED. libfpv does height, shelter and gusts.
+  - The game's own wind: CVehicle::FlyingControl 0x6D85F0 works on the airspeed m_vecMoveSpeed − WindDir·fWindMult
+    (planes, helis, RC, autogyro; mission vehicles exempt). Trees: CEntity::ModifyMatrixForTreeInWind 0x534E90 (gusty
+    table from Wind 0.5). The rooftop wind sound is CAEWeatherAudioEntity scaling with the camera's z / 500.
+  - CWindModifiers (Number 0xC81450, Array 0xC81458): the only RegisterOne (0x72C8B0) call is at 0x6C51E4 in
+    CHeli::ProcessControl: power min(1, m_fHeliRotorSpeed·6.667) (0x866FBC), from rotor speed 0.0075. Read by
+    ModifyMatrixForTreeInWind (0x53501D) and 0x5E6980. Not used: the mod scans the vehicle pool itself.
+  - Helicopter downwash: m_nVehicleSubType +0x594 == 3 (CHeli ctor stores it at 0x6C41E9), m_fHeliRotorSpeed +0x84C
+    (CHeli::ProcessControl reads it), CPhysical::m_fMass +0x8C (ApplyMoveForce 0x542A07). Rotor radius 0.42 × the
+    col box's length (CEntity::GetColModel 0x535300: ms_modelInfoPtrs 0xA9B0C8 [+0x22 model] -> +0x14 col model),
+    hub at the box's top. Thrust = weight × (rotor / 0.15)², induced velocity by momentum theory.
+  - Explosions: CExplosion::aExplosions 0xC88950, 16 × 0x7C (AddExplosion 0x736A50 walks them; active counter
+    +0x28, radius +0x10 set to 9 or 6). A slot that turns active (or moves) is a blast, radius × 0.5; molotovs
+    (type 1) don't blast.
+  - autotest: weather=<type> forces the weather at launch (ForcedWeatherType 0xC81318, Old 0xC81320, New 0xC8131C,
+    as ForceWeatherNow does; its entry at 0x72A4F0 jumps through the crack's stub).
+  - The drone trace line logs frame.wind; src/wind.cpp logs the weather wind and rotor sources every 10 s and each
+    blast. The wind functions are optional in src/fpvapi.h: an older libfpv.dll flies in still air.
+  - To verify in game: `at=2490,-1668,13.4,0 hover weather=8 secs=20` (Grove St, storm): the trace's wind should be
+    a few m/s near the ground, the drone drifting north-east; then the same from a rooftop and beside a police
+    helicopter (wanted=3).
+

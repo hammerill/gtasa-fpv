@@ -305,4 +305,60 @@ inline uint8_t &clock_minutes() { return *reinterpret_cast<uint8_t *>(0xB70152);
 // CPed::m_fHealth.
 inline float &ped_health(CPed *p) { return *reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(p) + 0x540); }
 
+// CWeather, set in CWeather::Update (0x72C398 on): Wind, the map's one wind by
+// weather type (0..1.5), and WindDir, its direction scaled by WindClipped
+// (always towards +X +Y, north-east, with a scripted wobble).
+inline float weather_wind() { return *reinterpret_cast<volatile float *>(0xC812F0); }
+inline const CVector &weather_wind_dir() { return *reinterpret_cast<const CVector *>(0xC813E0); }
+// CWeather::ForceWeatherNow (0x72A4F0, through the crack's jump): the forced,
+// old and new weather types all become `type` (8 = rainy SF, a storm's wind
+// 1.0; 19 = the desert sandstorm, 1.5; -1 = let the weather go on).
+inline void ForceWeatherNow(int16_t type) {
+    *reinterpret_cast<volatile int16_t *>(0xC81318) = type;
+    if (type < 0) return;
+    *reinterpret_cast<volatile int16_t *>(0xC81320) = type;
+    *reinterpret_cast<volatile int16_t *>(0xC8131C) = type;
+}
+
+// CVehicle::m_nVehicleSubType (3 = heli, as the CHeli constructor sets it at
+// 0x6C41E9), CAutomobile::m_fHeliRotorSpeed (CHeli::ProcessControl's
+// downwash is at full power from 0.15), CPhysical::m_fMass (kg).
+inline uint32_t vehicle_subtype(const CVehicle *v) {
+    return *reinterpret_cast<const uint32_t *>(reinterpret_cast<const uint8_t *>(v) + 0x594);
+}
+constexpr uint32_t kVehicleHeli = 3;
+inline float heli_rotor_speed(const CVehicle *v) {
+    return *reinterpret_cast<const float *>(reinterpret_cast<const uint8_t *>(v) + 0x84C);
+}
+inline float mass_of(const CEntity *e) { return *reinterpret_cast<const float *>(reinterpret_cast<const uint8_t *>(e) + 0x8C); }
+
+// An entity's collision box (CEntity::GetColModel 0x535300 for non-vehicles:
+// CModelInfo::ms_modelInfoPtrs[m_nModelIndex]->m_pColModel; its CBoundingBox
+// min and max come first). Model space, null without a model.
+struct CBoundingBox {
+    CVector min, max;
+};
+inline const CBoundingBox *model_box(const CEntity *e) {
+    int16_t model = *reinterpret_cast<const int16_t *>(reinterpret_cast<const uint8_t *>(e) + 0x22);
+    if (model < 0) return nullptr;
+    auto *mi = reinterpret_cast<uint8_t *const *>(0xA9B0C8)[model];
+    return mi ? *reinterpret_cast<const CBoundingBox *const *>(mi + 0x14) : nullptr;
+}
+
+// CExplosion::aExplosions, 16 of 0x7C bytes (CExplosion::AddExplosion
+// 0x736A50 walks them): type, position, radius (9 or 6 m by type), and the
+// active counter at +0x28 (0 = free).
+struct CExplosionSlot {
+    int type;
+    CVector pos;
+    float radius;
+    uint8_t pad[0x28 - 0x14];
+    uint8_t active;
+    uint8_t pad2[0x7C - 0x29];
+};
+static_assert(sizeof(CExplosionSlot) == 0x7C, "CExplosion");
+inline const CExplosionSlot *explosions() { return reinterpret_cast<const CExplosionSlot *>(0xC88950); }
+constexpr int kExplosionCount = 16;
+constexpr int kExplosionMolotov = 1;
+
 }  // namespace sa

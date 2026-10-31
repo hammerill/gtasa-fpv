@@ -22,6 +22,11 @@ they do on a real quad.
   props, all through the game's own line-of-sight test.
 - **Crash effects**: a fast hit hurts a ped (the game's own damage event, as
   if CJ rammed them), dents a car or shoves a prop.
+- **Wind**: the drone flies in the game's weather. A storm blows hard
+  (sunny days are nearly calm), there's more of it higher up, it gusts, and
+  it's calm in the lee of buildings and indoors. Helicopters blow the drone
+  down and away, and explosions shove it. Your quad has to hold against it
+  like a real one. Turn it off or scale it in F8 > Fly > Wind.
 - **The world treats the drone as CJ.** Once the drone is 20 m from CJ, he
   stands in for it: hidden, frozen and untouchable, right where the quad is.
   Peds, gangs and the police react to the drone as they would to CJ (with a

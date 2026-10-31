@@ -24,10 +24,14 @@ namespace fpvapi {
     X(fpv_kamikaze_get_config) X(fpv_kamikaze_detonate) X(fpv_kamikaze_set_config)             \
     X(fpv_kamikaze_set_ending_support)
 
+// Wind (2026-10); null with an older libfpv.dll, which then flies in still air.
+#define FPV_WIND_FUNCTIONS(X) X(fpv_wind_defaults) X(fpv_wind_set) X(fpv_wind_set_sources) X(fpv_wind_add_blast)
+
 struct Api {
 #define FPV_FN(name) decltype(&::name) name = nullptr;
     FPV_FUNCTIONS(FPV_FN)
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)
+    FPV_WIND_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 };
 

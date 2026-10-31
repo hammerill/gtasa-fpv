@@ -13,6 +13,7 @@
 #include "sa.h"
 #include "sfx.h"
 #include "standin.h"
+#include "wind.h"
 #include "world.h"
 
 namespace drone {
@@ -305,6 +306,7 @@ void start() {
     }
     g_ending = Ending{};
     update_home();
+    wind::reset();
 
     hold_cj(true);
     QueryPerformanceCounter(&g_last_tick);
@@ -445,6 +447,7 @@ void step() {
     g_last_tick = now;
     if (dt > 0.1f) dt = 0.1f;
 
+    wind::update(dt, g_have_frame ? g_frame.position : g_spawn_pos);
     fpv_frame frame{};
     frame.struct_size = sizeof frame;
     fpv_result r = fpv.fpv_drone_tick(g_drone, dt, &frame);
@@ -502,10 +505,10 @@ void step() {
                               ks.arming_remaining, frame.channels[10], frame.channels[11]);
         }
         fpvlog::write("drone pos %.2f %.2f %.2f flags 0x%x alt %.2f thr %.2f fov %.1f (game %.1f, scale %.3f) near %.3f "
-                      "arm '%s'",
+                      "wind %.1f %.1f %.1f arm '%s'",
                       frame.position[0], frame.position[1], frame.position[2], frame.flags, frame.altitude,
-                      frame.channels[2], g_shot.fov, g_fov_passed, g_fov_scale, g_shot.near_clip,
-                      frame.arming_disable_text);
+                      frame.channels[2], g_shot.fov, g_fov_passed, g_fov_scale, g_shot.near_clip, frame.wind[0],
+                      frame.wind[1], frame.wind[2], frame.arming_disable_text);
     }
 }
 

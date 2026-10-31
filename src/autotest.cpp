@@ -10,7 +10,8 @@
 // at=<x>,<y>,<z>,<heading deg> (CJ goes there, outside, 3 s before the launch),
 // wanted=<stars> (CJ's wanted level at the launch), ped=<m> (the nearest ped
 // is put that far ahead of the drone, a target), car=<m> (the same with the
-// nearest car, parked across the path), time=<hour> (time of day), cruise=<s> (stop
+// nearest car, parked across the path), time=<hour> (time of day), weather=<type> (forced
+// from the launch: 8 rainy SF, a storm's wind; 19 sandstorm), cruise=<s> (stop
 // cruising and hover from then on), pitch=<0..1> (cruise stick, 0.5), yaw=<s> (turn around at that time) for yawdur=<s> (1.5), kamikaze
 // builds: "boom" (bomb arm switch on, then cruise into whatever is ahead),
 // "boomsw" (explode switch at 9 s; boomsw=<s> at that time), "signal" / "cutscene" (ending view), dur=<s> (its
@@ -42,7 +43,7 @@ struct Config {
          explode_switch = false;
     std::vector<float> shots;
     bool teleport = false;
-    int wanted = -1, hour = -1;
+    int wanted = -1, hour = -1, weather = -1;
     float ped_at = 0, car_at = 0;
     float at[4] = {};
     char end_action = 0;  // 'r', 'y' or '7' during a blast's ending
@@ -92,6 +93,7 @@ void read_config() {
     if (const char *p = std::strstr(buf, "ped=")) g_cfg.ped_at = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "car=")) g_cfg.car_at = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "time=")) g_cfg.hour = std::atoi(p + 5);
+    if (const char *p = std::strstr(buf, "weather=")) g_cfg.weather = std::atoi(p + 8);
     if (const char *p = std::strstr(buf, "wanted=")) g_cfg.wanted = std::atoi(p + 7);
     if (const char *p = std::strstr(buf, "endact=")) g_cfg.end_action = p[7] == 'f' ? '7' : p[7];
     if (const char *p = std::strstr(buf, "endwait=")) g_cfg.end_action_at = float(std::atof(p + 8));
@@ -273,6 +275,7 @@ void launch() {
         sa::clock_hours() = uint8_t(g_cfg.hour % 24);
         sa::clock_minutes() = 0;
     }
+    if (g_cfg.weather >= 0) sa::ForceWeatherNow(int16_t(g_cfg.weather));
     if (g_cfg.wanted >= 0)
         if (sa::CPed *cj = sa::FindPlayerPed()) sa::SetWantedLevel(cj, g_cfg.wanted);
     drone::toggle();

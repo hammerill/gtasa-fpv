@@ -54,6 +54,7 @@ bool load() {
 #define FPV_FN(name) \
     fpv.name = reinterpret_cast<decltype(fpv.name)>(reinterpret_cast<void *>(GetProcAddress(lib, #name)));
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)
+    FPV_WIND_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 
     std::string data_dir = paths::mod_dir() + "\\fpv-data";
@@ -76,8 +77,9 @@ bool load() {
     }
     g_failed = false;
     g_loaded = true;
-    fpvlog::write("libfpv %s initialised (%s), data in %s", fpv.fpv_version_string(),
-                  kamikaze() ? "kamikaze build" : "no warhead", data_dir.c_str());
+    fpvlog::write("libfpv %s initialised (%s, %s), data in %s", fpv.fpv_version_string(),
+                  kamikaze() ? "kamikaze build" : "no warhead", fpv.fpv_wind_set ? "wind" : "no wind (older libfpv)",
+                  data_dir.c_str());
     return true;
 }
 

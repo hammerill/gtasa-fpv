@@ -33,6 +33,7 @@ add_library(gtasa_fpv_core SHARED
   src/pilot.cpp
   src/sfx.cpp
   src/standin.cpp
+  src/wind.cpp
   src/world.cpp
   src/log.cpp
   src/patch.cpp
