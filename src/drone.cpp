@@ -548,6 +548,7 @@ void move_cj_here() {
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj) return;
     sa::LoadScene({pos[0], pos[1], z});
+    sa::EnsureCollisionIsInMemory({pos[0], pos[1], z});
     sa::CVehicle *car = sa::FindPlayerVehicle();
     sa::CEntity *mover = car ? car : cj;
     sa::Teleport(mover, {pos[0], pos[1], z + (car ? 1.5f : 1.0f)}, false);

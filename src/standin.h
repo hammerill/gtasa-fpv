@@ -3,7 +3,8 @@
 // frozen, collision-less and untouchable, so peds, gangs, police, traffic,
 // population and streaming all see "CJ" right where the quad is. Back under
 // 10 m from his spot, he goes home. In a vehicle he stays put and only the
-// FindPlayer* queries (streaming, population, traffic) follow the drone.
+// FindPlayer* queries (streaming, population, traffic) follow the drone; his
+// car is held at its spot and kept from the population's clean-up meanwhile.
 // He still shows at his spot (pilot.cpp: moved home for the render passes).
 #pragma once
 

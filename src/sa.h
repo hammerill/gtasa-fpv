@@ -186,7 +186,15 @@ constexpr int kVehicleSize = 0xA18;
 inline void SetHelpMessage(const char *text) {
     reinterpret_cast<void(__cdecl *)(const char *, bool, bool, bool)>(0x588BE0)(text, false, false, false);
 }
+// CStreaming::LoadScene loads models and IPLs, not collision: CColStore keeps
+// that around FindPlayerCoors each frame (CStreaming::Update), so a spot the
+// player left has no ground until the next frames stream it.
 inline void LoadScene(const CVector &at) { reinterpret_cast<void(__cdecl *)(const CVector &)>(0x40EB70)(at); }
+// CColStore::EnsureCollisionIsInMemory: requests the col files covering `at`
+// and, if any was missing, loads them right away (CTimer suspended).
+inline void EnsureCollisionIsInMemory(const CVector &at) {
+    reinterpret_cast<void(__cdecl *)(const CVector &)>(0x410AD0)(at);
+}
 // CEntity::Teleport(CVector, bool reset_rotation), virtual slot 14 (CPed's
 // is 0x5E4110, CAutomobile's 0x6A9CA0; both pop 0x10 bytes).
 inline void Teleport(CEntity *e, CVector at, bool reset_rotation) {
@@ -319,6 +327,13 @@ inline void ForceWeatherNow(int16_t type) {
     *reinterpret_cast<volatile int16_t *>(0xC81320) = type;
     *reinterpret_cast<volatile int16_t *>(0xC8131C) = type;
 }
+
+// CVehicle::m_nCreatedBy (1 random, 2 mission, 3 parked, 4 permanent). CVehicle::CanBeDeleted
+// (0x6D1180) lets the population remove a random or parked car even with a ped
+// driving it (PED_DRIVING 0x32 at +0x530): fine while CJ is never far from his
+// car, not when FindPlayerCentreOfWorld is at the drone.
+inline uint8_t &vehicle_created_by(CVehicle *v) { return reinterpret_cast<uint8_t *>(v)[0x4A4]; }
+constexpr uint8_t kVehicleRandom = 1, kVehicleMission = 2, kVehicleParked = 3;
 
 // CVehicle::m_nVehicleSubType (3 = heli, as the CHeli constructor sets it at
 // 0x6C41E9), CAutomobile::m_fHeliRotorSpeed (CHeli::ProcessControl's

@@ -280,3 +280,14 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
   - autotest: weather=-1 gives the weather back to the game (ForcedWeatherType -1). Seen: a core hot-reload re-runs
     the last autotest.txt (the trigger time is not kept across reloads); delete the file after a test.
 
+- 2026-10-31 (evening): stand-in leaves the pilot's spot without ground (user report: from a car, flying far makes
+  the car sink into the ground and get deleted; on foot CJ drops through and is put back on the ground from below).
+  - Cause: CStreaming::LoadScene (0x40EB70) loads models and IPLs but never collision; CColStore streams that around
+    FindPlayerCoors each frame, which the stand-in moves to the drone, so the spot's col files get unloaded. The
+    held car then falls through; and CVehicle::CanBeDeleted (0x6D1180) lets the population remove a random (1) or
+    parked (3) car even with CJ driving it (ped state 0x32), once it's far from FindPlayerCentreOfWorld.
+  - Fix (not yet verified in game): Queries mode holds the car (matrix kept, speeds zeroed every step) only while the
+    drone is over 100 m from it, so near events (a truck pushing it) still move it; and sets m_nCreatedBy (+0x4A4) to
+    mission (2) until the stand-in ends. Every return home (car or CJ) and "Move CJ here"
+    calls CColStore::EnsureCollisionIsInMemory (0x410AD0) after LoadScene: it requests the col files covering the
+    point and loads them right away.

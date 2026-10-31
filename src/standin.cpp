@@ -13,6 +13,7 @@ namespace {
 constexpr float kStart = 20.0f;  // drone this far from CJ's spot: he stands in for it
 constexpr float kStop = 10.0f;   // back this close: he goes home
 constexpr float kReplace = 2.0f;  // re-add him to the world sectors after this much travel
+constexpr float kHoldCar = 100.0f;  // drone this far from CJ's car: it's held where it is
 
 enum class Mode { Off, Body, Queries };  // Body: CJ himself at the drone; Queries: only FindPlayer*
 
@@ -22,6 +23,17 @@ float g_home_heading = 0;  // radians
 sa::CVector g_drone{};     // latest drone position
 sa::CVector g_placed{};    // where CJ was last re-added
 uint32_t g_saved_flags = 0;
+
+// Queries mode: CJ's car. Streaming follows the drone, so with the drone far
+// the ground's collision under it goes away (it would sink through the map):
+// past kHoldCar it's held where it is. Closer, it's free (a truck can push it).
+// And the population sees it far from "the player" (it would be deleted):
+// it's a mission car until the stand-in ends.
+int g_car = -1;  // script handle: GetVehicle gives null once it is gone
+bool g_car_held = false;
+sa::CVector g_car_axes[3]{};  // right, forward, up
+sa::CVector g_car_pos{};
+uint8_t g_car_created_by = 0;
 
 struct Original {
     uintptr_t find_coors, find_centre, find_centre_no_sniper, damage, process_control;
@@ -90,14 +102,65 @@ void place(sa::CPed *cj) {
     if (refile) sa::WorldAdd(cj);
 }
 
+void hold_car() {
+    sa::CVehicle *car = g_car >= 0 ? sa::GetVehicle(g_car) : nullptr;
+    if (!car || !car->matrix) return;
+    bool far = dist(car->matrix->pos, g_drone) > kHoldCar;
+    if (far && !g_car_held) {  // from where it is now
+        g_car_axes[0] = car->matrix->right;
+        g_car_axes[1] = car->matrix->forward;
+        g_car_axes[2] = car->matrix->up;
+        g_car_pos = car->matrix->pos;
+        fpvlog::write("standin: drone %.0f m from CJ's car, held at %.2f %.2f %.2f", dist(g_car_pos, g_drone),
+                      g_car_pos.x, g_car_pos.y, g_car_pos.z);
+    } else if (!far && g_car_held) {
+        sa::EnsureCollisionIsInMemory(g_car_pos);  // usually streamed by now; if not, before it can fall
+        fpvlog::write("standin: drone back near CJ's car, free");
+    }
+    g_car_held = far;
+    if (!far) return;
+    car->matrix->right = g_car_axes[0];
+    car->matrix->forward = g_car_axes[1];
+    car->matrix->up = g_car_axes[2];
+    car->matrix->pos = g_car_pos;
+    sa::move_speed(car) = sa::turn_speed(car) = {0, 0, 0};
+}
+
+void keep_car(sa::CVehicle *car) {
+    g_car = sa::GetVehicleRef(car);
+    g_car_held = false;
+    g_car_created_by = sa::vehicle_created_by(car);
+    if (g_car_created_by == sa::kVehicleRandom || g_car_created_by == sa::kVehicleParked)
+        sa::vehicle_created_by(car) = sa::kVehicleMission;
+}
+
+// go_home false: it is about to be moved to the drone, where the ground is streamed.
+void release_car(bool go_home) {
+    if (g_car < 0) return;
+    if (sa::CVehicle *car = sa::GetVehicle(g_car)) {
+        if (go_home && car->matrix) {
+            sa::LoadScene(car->matrix->pos);
+            sa::EnsureCollisionIsInMemory(car->matrix->pos);  // the ground back under it before it moves again
+        }
+        sa::vehicle_created_by(car) = g_car_created_by;
+        fpvlog::write("standin: CJ's car released%s", g_car_held ? " (was held)" : "");
+    } else {
+        fpvlog::write("standin: CJ's car is gone");
+    }
+    g_car = -1;
+    g_car_held = false;
+}
+
 void begin() {
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj || !cj->matrix) return;
     g_home = cj->position();
     g_home_heading = std::atan2(-cj->matrix->forward.x, cj->matrix->forward.y);
-    if (sa::FindPlayerVehicle()) {
+    if (sa::CVehicle *car = sa::FindPlayerVehicle()) {
         g_mode = Mode::Queries;
-        fpvlog::write("standin: CJ is in a vehicle; streaming and population follow the drone, he stays");
+        keep_car(car);
+        fpvlog::write("standin: CJ is in a vehicle; streaming and population follow the drone, he and it stay "
+                      "(created by %d)", g_car_created_by);
         return;
     }
     g_saved_flags = sa::entity_flags(cj);
@@ -155,6 +218,7 @@ void update(const float drone_pos[3]) {
     }
     if (g_mode == Mode::Body)
         if (sa::CPed *cj = sa::FindPlayerPed()) place(cj);
+    if (g_mode == Mode::Queries) hold_car();
 }
 
 void end(bool go_home) {
@@ -162,6 +226,7 @@ void end(bool go_home) {
     Mode mode = g_mode;
     g_mode = Mode::Off;
     pilot::away(nullptr);
+    if (mode == Mode::Queries) release_car(go_home);
     sa::CPed *cj = sa::FindPlayerPed();
     if (mode != Mode::Body || !cj) return;
     sa::entity_flags(cj) = (sa::entity_flags(cj) & ~(sa::kEntityUsesCollision | sa::kEntityVisible)) |
@@ -171,6 +236,7 @@ void end(bool go_home) {
         return;
     }
     sa::LoadScene(g_home);
+    sa::EnsureCollisionIsInMemory(g_home);  // else he drops through his spot until it streams back
     if (cj->matrix) {  // like place(): CPed::Teleport would restart the pose
         sa::WorldRemove(cj);
         cj->matrix->pos = g_home;
