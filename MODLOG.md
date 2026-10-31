@@ -257,3 +257,11 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
     a few m/s near the ground, the drone drifting north-east; then the same from a rooftop and beside a police
     helicopter (wanted=3).
 
+
+- 2026-10-31: libfpv's shared data folder. fpvapi::load passes fpv_shared_data_dir() (%APPDATA%\libfpv, or
+  LIBFPV_DATA_DIR) as cfg.data_dir, so radio mappings, EEPROMs and settings.json follow the pilot between libfpv
+  games. First run: if the shared folder doesn't exist, fpv-data is copied into it (minus the mod's own files:
+  shots/, autotest.txt, shot.txt, gtasa-fpv.ini; the old folder is kept); if it exists, it wins. The function is
+  optional in src/fpvapi.h: an older libfpv.dll, or a failed call, keeps fpv-data. Mod-only files (autotest and
+  shot triggers, screenshots, the old ini) stay in fpv-data. The UTF-8 path goes through fs::u8path. Built; **not
+  yet verified in game** (check the log's "data in" line and the "moved settings" line).

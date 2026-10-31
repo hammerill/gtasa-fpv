@@ -101,8 +101,13 @@ every release. Every push to `main` builds a release
 | `libfpv.dll` | libfpv, i686 build |
 | `libfpv.LICENSE.txt` | libfpv's license (GPL-3.0-or-later) |
 
-Everything is found next to the `.asi`: settings, radio mappings and
-Betaflight EEPROMs go in `fpv-data/` there, and the log is `GTASA.FPV.log`.
+Settings, radio mappings and Betaflight EEPROMs go in libfpv's shared
+folder, `%APPDATA%\libfpv` (or `LIBFPV_DATA_DIR` if set), so they follow
+you to other libfpv games and survive a game reinstall. On the first run,
+the mod copies an older `fpv-data/` there unless the shared folder already
+exists. With a libfpv older than 2026-10, or without a home folder, they
+stay in `fpv-data/` next to the `.asi`. The log is `GTASA.FPV.log`, next to
+the `.asi` too.
 
 ## Building
 

@@ -76,6 +76,8 @@ Extract the newest `gtasa-fpv.zip` over the old files. Your settings are kept.
 
 Delete the `modloader/FPV Drone` folder (or, without Modloader, the four
 files plus `GTASA.FPV.core.live.dll`, `GTASA.FPV.log` and `fpv-data/`).
+Your radio mappings, Betaflight tune and settings stay in `%APPDATA%\libfpv`,
+shared with other libfpv games; delete that folder too to remove them.
 
 ## Something wrong?
 

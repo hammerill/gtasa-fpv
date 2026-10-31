@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <filesystem>
 #include <string>
 
 #include "log.h"
@@ -19,6 +20,49 @@ bool g_failed = false;
 void on_fpv_log(void *, fpv_log_level level, const char *message) {
     static const char *names[] = {"debug", "info", "warn", "error"};
     fpvlog::write("libfpv %s: %s", names[level & 3], message);
+}
+
+// The mod's own files in fpv-data, which stay there: test triggers,
+// screenshots and the pre-libfpv-settings ini that kamikaze.cpp migrates.
+bool mod_own_file(const std::filesystem::path &name) {
+    return name == "shots" || name == "autotest.txt" || name == "shot.txt" || name == "gtasa-fpv.ini";
+}
+
+// libfpv's shared folder (%APPDATA%\libfpv), so the radio mappings, the tune
+// and the settings follow the pilot between libfpv games and survive a game
+// reinstall. The first time, it takes over what earlier versions kept in
+// fpv-data, unless another game already created it (then the pilot's setup
+// there wins). Falls back to fpv-data with an older libfpv.dll or when there
+// is no home folder.
+std::string pick_data_dir() {
+    namespace fs = std::filesystem;
+    std::string old_dir = paths::mod_dir() + "\\fpv-data";
+    if (!fpv.fpv_shared_data_dir) {
+        fpvlog::write("libfpv.dll has no fpv_shared_data_dir (older libfpv), using %s", old_dir.c_str());
+        return old_dir;
+    }
+    char shared[1024];
+    fpv_result r = fpv.fpv_shared_data_dir(shared, sizeof shared);
+    if (r != FPV_OK) {
+        fpvlog::write("fpv_shared_data_dir: %s, using %s", fpv.fpv_result_string(r), old_dir.c_str());
+        return old_dir;
+    }
+    // libfpv's path is UTF-8; the game's narrow strings are the ANSI code page.
+    fs::path shared_path = fs::u8path(shared), old_path(old_dir);
+    std::error_code ec;
+    if (!fs::exists(shared_path, ec) && fs::is_directory(old_path, ec)) {
+        fs::create_directories(shared_path, ec);
+        for (const auto &entry : fs::directory_iterator(old_path, ec)) {
+            if (mod_own_file(entry.path().filename())) continue;
+            std::error_code copy_ec;
+            fs::copy(entry.path(), shared_path / entry.path().filename(),
+                     fs::copy_options::recursive | fs::copy_options::skip_existing, copy_ec);
+            if (copy_ec)
+                fpvlog::write("cannot copy %s: %s", entry.path().string().c_str(), copy_ec.message().c_str());
+        }
+        fpvlog::write("moved settings from %s to %s (the old folder is kept)", old_dir.c_str(), shared);
+    }
+    return shared;
 }
 
 }  // namespace
@@ -55,9 +99,10 @@ bool load() {
     fpv.name = reinterpret_cast<decltype(fpv.name)>(reinterpret_cast<void *>(GetProcAddress(lib, #name)));
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)
     FPV_WIND_FUNCTIONS(FPV_FN)
+    FPV_SHARED_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 
-    std::string data_dir = paths::mod_dir() + "\\fpv-data";
+    std::string data_dir = pick_data_dir();
     fpv_global_config cfg;
     fpv.fpv_global_config_defaults(&cfg);
     cfg.data_dir = data_dir.c_str();

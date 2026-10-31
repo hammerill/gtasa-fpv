@@ -27,11 +27,16 @@ namespace fpvapi {
 // Wind (2026-10); null with an older libfpv.dll, which then flies in still air.
 #define FPV_WIND_FUNCTIONS(X) X(fpv_wind_defaults) X(fpv_wind_set) X(fpv_wind_set_sources) X(fpv_wind_add_blast)
 
+// The shared per-user data folder (2026-10); null with an older libfpv.dll,
+// which then keeps its data in the mod's fpv-data folder.
+#define FPV_SHARED_FUNCTIONS(X) X(fpv_shared_data_dir)
+
 struct Api {
 #define FPV_FN(name) decltype(&::name) name = nullptr;
     FPV_FUNCTIONS(FPV_FN)
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)
     FPV_WIND_FUNCTIONS(FPV_FN)
+    FPV_SHARED_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 };
 
