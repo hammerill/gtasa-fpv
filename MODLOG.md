@@ -265,3 +265,18 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
   optional in src/fpvapi.h: an older libfpv.dll, or a failed call, keeps fpv-data. Mod-only files (autotest and
   shot triggers, screenshots, the old ini) stay in fpv-data. The UTF-8 path goes through fs::u8path. Built; **not
   yet verified in game** (check the log's "data in" line and the "moved settings" line).
+
+- 2026-10-31 (afternoon): wind **verified in game** (Big Smoke save, CJ walked out of the house first: the autotest
+  teleport from an interior leaves the black-and-white interior sky, so it doesn't count as outside).
+  - User report: sometimes no wind at all, even on top of Maze Bank. The log showed CWeather::Wind easing from 0.20
+    to 0.00 and back (an extra sunny weather type, 0 in the game's table) while the game's wind sound still blew up
+    high (it scales with the camera's height). Fix: the weather wind is at least 2 m/s (kCalmMps).
+  - Calm (weather=0, game Wind 0.00), Maze Bank roof: about 0.7 m/s on the roof's surface, about 3.8 m/s
+    hovering 1.5 m above it, drifting north-east 25 m in 10 s.
+  - Storm (weather=8), Grove St at 13 m: mean about 3 m/s, gusts to 5.7 m/s with short reversals between the
+    houses, 17 m of drift in 10 s.
+  - Storm, Maze Bank roof: 7-9 m/s on the roof, 21-23 m/s once the drone drifted off its edge (the log profile at
+    330 m), carried about 150 m in 10 s. Real, and hard to fly in: the F8 slider scales it.
+  - autotest: weather=-1 gives the weather back to the game (ForcedWeatherType -1). Seen: a core hot-reload re-runs
+    the last autotest.txt (the trigger time is not kept across reloads); delete the file after a test.
+

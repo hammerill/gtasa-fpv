@@ -15,6 +15,11 @@ namespace {
 // CWeather::Wind is 0..0.25 when sunny, 0.7 cloudy, 1.0 in the rain storms
 // and 1.5 in the sandstorm: 1.0 is a storm's 11 m/s at 10 m.
 constexpr float kStormMps = 11.0f;
+// The extra sunny weathers have Wind 0, dead calm everywhere, while the
+// game's wind sound still blows up high (it scales with the camera's
+// height). Real air is never that still: a light breeze at least, which
+// libfpv makes about 4 m/s on top of Maze Bank.
+constexpr float kCalmMps = 2.0f;
 // WindDir wobbles over 1-2 s by script, the same everywhere: libfpv makes
 // the gusts, so only its slow mean direction is passed on.
 constexpr float kDirSeconds = 4.0f;
@@ -48,7 +53,7 @@ void weather(float dt) {
     }
     float l = std::hypot(g_dir[0], g_dir[1]);
     float dx = l > 1e-3f ? g_dir[0] / l : 0.7071f, dy = l > 1e-3f ? g_dir[1] / l : 0.7071f;
-    float speed = std::max(0.0f, sa::weather_wind()) * kStormMps;
+    float speed = std::max(kCalmMps, sa::weather_wind() * kStormMps);
 
     fpv_wind w;
     fpv.fpv_wind_defaults(&w);
@@ -132,7 +137,7 @@ void update(float dt, const float drone_pos[3]) {
     if (g_log_timer <= 0) {
         g_log_timer = 10.0f;
         fpvlog::write("wind: weather %.2f (%.1f m/s towards %.0f deg from north), area %d, %u rotor source(s)",
-                      sa::weather_wind(), std::max(0.0f, sa::weather_wind()) * kStormMps,
+                      sa::weather_wind(), std::max(kCalmMps, sa::weather_wind() * kStormMps),
                       std::atan2(g_dir[0], g_dir[1]) * 57.2958f, sa::current_area(), n);
     }
 }
