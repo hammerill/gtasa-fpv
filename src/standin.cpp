@@ -16,6 +16,7 @@ constexpr float kReplace = 2.0f;  // re-add him to the world sectors after this 
 constexpr float kHoldCar = 100.0f;  // drone this far from CJ's car: it's held where it is
 
 enum class Mode { Off, Body, Queries };  // Body: CJ himself at the drone; Queries: only FindPlayer*
+constexpr float kMaxHeadOffset = 1.5f;  // beyond this his bones aren't in place yet
 
 Mode g_mode = Mode::Off;
 sa::CVector g_home{};      // CJ's spot
@@ -23,6 +24,7 @@ float g_home_heading = 0;  // radians
 sa::CVector g_drone{};     // latest drone position
 sa::CVector g_placed{};    // where CJ was last re-added
 uint32_t g_saved_flags = 0;
+bool g_seated = false;  // Body mode from a vehicle: he goes back in it afterwards
 
 // Queries mode: CJ's car. Streaming follows the drone, so with the drone far
 // the ground's collision under it goes away (it would sink through the map):
@@ -35,10 +37,20 @@ sa::CVector g_car_axes[3]{};  // right, forward, up
 sa::CVector g_car_pos{};
 uint8_t g_car_created_by = 0;
 
+// CAEVehicleAudioEntity::Service (0x502280) turns the radio off the frame the
+// player stops driving and on again when he drives: kept on while he is out
+// of his car standing in (it isn't positional, so it sounds as before).
+constexpr sa::CallSite kRadioOn = {0x50237C, 0x4F5B20};   // TurnOnRadioForVehicle(), thiscall
+constexpr sa::CallSite kRadioOff = {0x5023A3, 0x4F5B60};  // TurnOffRadioForVehicle(), thiscall
+constexpr uintptr_t kVehicleAudio = 0x138;               // CVehicle::m_vehicleAudio (+0x4: its vehicle)
+bool g_radio_kept = false;  // we skipped the "off" for CJ's car
+
 struct Original {
-    uintptr_t find_coors, find_centre, find_centre_no_sniper, damage, process_control;
+    uintptr_t find_coors, find_centre, find_centre_no_sniper, damage, process_control, radio_on, radio_off;
 };
 Original g;
+
+void *pilot_clump(sa::CEntity *e) { return *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(e) + 0x18); }
 
 float dist(const sa::CVector &a, const sa::CVector &b) {
     float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
@@ -90,16 +102,84 @@ void __attribute__((thiscall)) process_control_hook(sa::CPed *ped) {
     reinterpret_cast<void(__attribute__((thiscall)) *)(sa::CPed *)>(g.process_control)(ped);
 }
 
+sa::CVehicle *audio_vehicle(void *audio) { return *reinterpret_cast<sa::CVehicle **>(static_cast<uint8_t *>(audio) + 4); }
+
+void __attribute__((thiscall)) radio_off_hook(void *audio) {
+    if (g_mode == Mode::Body && g_seated && g_car >= 0 && audio_vehicle(audio) == sa::GetVehicle(g_car)) {
+        if (!g_radio_kept) fpvlog::write("standin: CJ's car radio kept on");
+        g_radio_kept = true;
+        return;
+    }
+    if (g_car < 0 || audio_vehicle(audio) == sa::GetVehicle(g_car)) g_radio_kept = false;
+    reinterpret_cast<void(__attribute__((thiscall)) *)(void *)>(g.radio_off)(audio);
+}
+
+void __attribute__((thiscall)) radio_on_hook(void *audio) {
+    if (g_radio_kept && audio_vehicle(audio) == sa::FindPlayerVehicle()) {  // back in it: still playing
+        g_radio_kept = false;
+        fpvlog::write("standin: CJ back in his car, radio still on");
+        return;
+    }
+    g_radio_kept = false;
+    reinterpret_cast<void(__attribute__((thiscall)) *)(void *)>(g.radio_on)(audio);
+}
+
 void place(sa::CPed *cj) {
     // Every frame: the game makes the player visible again on its own (camera code).
     sa::entity_flags(cj) &= ~(sa::kEntityUsesCollision | sa::kEntityVisible);
     if (!cj->matrix) return;
+    // His head right at the drone: what peds look at (their look-at IK aims at
+    // the head bone) and close to what they aim at. FindPlayerCoors is the
+    // drone itself. The bones are where he was last placed, so head - pos is
+    // the pose's own offset.
+    sa::CVector at = g_drone;
+    if (pilot_clump(cj)) {
+        sa::CVector head = sa::bone_position(cj, sa::kBoneHead), &pos = cj->matrix->pos;
+        sa::CVector off = {head.x - pos.x, head.y - pos.y, head.z - pos.z};
+        if (dist(head, pos) < kMaxHeadOffset) at = {g_drone.x - off.x, g_drone.y - off.y, g_drone.z - off.z};
+    }
     // New world sector maybe: Remove + Add. Not CPed::Teleport, which first
     // flushes his tasks: that knocked him out of the pilot's pose every 2 m.
-    bool refile = dist(g_placed, g_drone) > kReplace;
-    if (refile) sa::WorldRemove(cj), g_placed = g_drone;
-    cj->matrix->pos = g_drone;
+    bool refile = dist(g_placed, at) > kReplace;
+    if (refile) sa::WorldRemove(cj), g_placed = at;
+    cj->matrix->pos = at;
     if (refile) sa::WorldAdd(cj);
+}
+
+// A held car out of the hold (CJ back in it, or the drone back near). While CJ is out of it,
+// it isn't simulated: it hangs in its pose with its wheels marked off the ground, and after a
+// hold its first steps threw it up off a roof, onto its side or its back. So the game puts it
+// down on its wheels, then it's pinned there a moment while its wheels find the ground again.
+constexpr uint32_t kSettleMs = 500;
+int g_settle_car = -1;  // script handle
+uint32_t g_settle_until = 0;
+sa::CVector g_settle_axes[3]{}, g_settle_pos{};
+
+void set_down(sa::CVehicle *car) {
+    if (sa::is_automobile(car)) sa::PlaceOnRoadProperly(car);
+    sa::move_speed(car) = sa::turn_speed(car) = {0, 0, 0};
+    const sa::CMatrix &m = *car->matrix;
+    g_settle_axes[0] = m.right, g_settle_axes[1] = m.forward, g_settle_axes[2] = m.up;
+    g_settle_pos = m.pos;
+    g_settle_car = sa::GetVehicleRef(car);
+    g_settle_until = sa::timer_ms() + kSettleMs;
+}
+
+void settle() {
+    if (g_settle_car < 0) return;
+    sa::CVehicle *car = sa::GetVehicle(g_settle_car);
+    if (!car || !car->matrix || sa::timer_ms() >= g_settle_until) {
+        if (car && car->matrix)
+            fpvlog::write("standin: CJ's car set down at %.2f %.2f %.2f, up %.2f %.2f %.2f", car->matrix->pos.x,
+                          car->matrix->pos.y, car->matrix->pos.z, car->matrix->up.x, car->matrix->up.y,
+                          car->matrix->up.z);
+        g_settle_car = -1;
+        return;
+    }
+    sa::CMatrix &m = *car->matrix;
+    m.right = g_settle_axes[0], m.forward = g_settle_axes[1], m.up = g_settle_axes[2];
+    m.pos = g_settle_pos;
+    sa::move_speed(car) = sa::turn_speed(car) = {0, 0, 0};
 }
 
 void hold_car() {
@@ -115,6 +195,7 @@ void hold_car() {
                       g_car_pos.x, g_car_pos.y, g_car_pos.z);
     } else if (!far && g_car_held) {
         sa::EnsureCollisionIsInMemory(g_car_pos);  // usually streamed by now; if not, before it can fall
+        set_down(car);
         fpvlog::write("standin: drone back near CJ's car, free");
     }
     g_car_held = far;
@@ -141,6 +222,7 @@ void release_car(bool go_home) {
         if (go_home && car->matrix) {
             sa::LoadScene(car->matrix->pos);
             sa::EnsureCollisionIsInMemory(car->matrix->pos);  // the ground back under it before it moves again
+            if (g_car_held) set_down(car);
         }
         sa::vehicle_created_by(car) = g_car_created_by;
         fpvlog::write("standin: CJ's car released%s", g_car_held ? " (was held)" : "");
@@ -151,23 +233,51 @@ void release_car(bool go_home) {
     g_car_held = false;
 }
 
+float dot(const sa::CVector &a, const sa::CVector &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+// v in the frame of m's axes.
+sa::CVector to_local(const sa::CMatrix &m, const sa::CVector &v) { return {dot(v, m.right), dot(v, m.forward), dot(v, m.up)}; }
+
+// From the driver's seat: CJ gets out on the spot (as WARP_CHAR_FROM_CAR_TO_COORD
+// does), so he stands in on foot like anywhere else (peds look at him, pickups
+// see him), and pilot.cpp draws him in his seat. False: he is still in it.
+bool leave_car(sa::CPed *cj, sa::CVehicle *car, pilot::Seat &seat) {
+    const sa::CMatrix &c = *car->matrix, &m = *cj->matrix;
+    seat.car = g_car;
+    seat.axes[0] = to_local(c, m.right), seat.axes[1] = to_local(c, m.forward), seat.axes[2] = to_local(c, m.up);
+    seat.offset = to_local(c, {m.pos.x - c.pos.x, m.pos.y - c.pos.y, m.pos.z - c.pos.z});
+    seat.anim = pilot::seat_anim(cj);
+    sa::FlushImmediately(cj, true);
+    return !sa::FindPlayerVehicle();
+}
+
 void begin() {
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj || !cj->matrix) return;
     g_home = cj->position();
     g_home_heading = std::atan2(-cj->matrix->forward.x, cj->matrix->forward.y);
+    g_seated = false;
+    pilot::Seat seat{};
     if (sa::CVehicle *car = sa::FindPlayerVehicle()) {
-        g_mode = Mode::Queries;
         keep_car(car);
-        fpvlog::write("standin: CJ is in a vehicle; streaming and population follow the drone, he and it stay "
-                      "(created by %d)", g_car_created_by);
-        return;
+        // Missions check that he stays in it; as a passenger there's no seat to warp back to.
+        bool can_leave = car->matrix && sa::vehicle_driver(car) == cj && !sa::on_a_mission();
+        if (!can_leave || !leave_car(cj, car, seat)) {
+            g_mode = Mode::Queries;
+            fpvlog::write("standin: CJ is in a vehicle (%s); streaming and population follow the drone, he and it "
+                          "stay (created by %d)", !can_leave ? sa::on_a_mission() ? "on a mission" : "not driving"
+                                                             : "didn't get out", g_car_created_by);
+            return;
+        }
+        g_seated = true;
+        fpvlog::write("standin: CJ out of his vehicle (created by %d, seat anim %s)", g_car_created_by,
+                      seat.anim ? "found" : "missing");
     }
     g_saved_flags = sa::entity_flags(cj);
     g_mode = Mode::Body;
     g_placed = {1e9f, 0, 0};
     place(cj);
-    pilot::away(&g_home);  // still drawn at his spot
+    pilot::away(&g_home, g_seated ? &seat : nullptr);  // still drawn at his spot (or seat)
     fpvlog::write("standin: CJ stands in for the drone, home %.2f %.2f %.2f", g_home.x, g_home.y, g_home.z);
 }
 
@@ -188,12 +298,17 @@ void install_hooks() {
                                                          reinterpret_cast<void *>(&damage_hook)));
     g.process_control =
         patch::replace_pointer(sa::kPlayerPedProcessControlSlot, reinterpret_cast<void *>(&process_control_hook));
+    g.radio_on = patch::redirect_call(kRadioOn.site, kRadioOn.fn, reinterpret_cast<void *>(&radio_on_hook));
+    g.radio_off = patch::redirect_call(kRadioOff.site, kRadioOff.fn, reinterpret_cast<void *>(&radio_off_hook));
     pilot::install_hooks();
-    fpvlog::write("standin: hooks coors %d centre %d/%d damage %d control %08X", g.find_coors != 0,
-                  g.find_centre != 0, g.find_centre_no_sniper != 0, g.damage != 0, unsigned(g.process_control));
+    fpvlog::write("standin: hooks coors %d centre %d/%d damage %d control %08X radio %d/%d", g.find_coors != 0,
+                  g.find_centre != 0, g.find_centre_no_sniper != 0, g.damage != 0, unsigned(g.process_control),
+                  g.radio_on != 0, g.radio_off != 0);
 }
 
 bool on() { return g_mode != Mode::Off; }
+
+void tick() { settle(); }
 
 void home(float out[3]) {
     sa::CVector p = g_mode != Mode::Off ? g_home : [] {
@@ -218,7 +333,7 @@ void update(const float drone_pos[3]) {
     }
     if (g_mode == Mode::Body)
         if (sa::CPed *cj = sa::FindPlayerPed()) place(cj);
-    if (g_mode == Mode::Queries) hold_car();
+    if (g_car >= 0) hold_car();
 }
 
 void end(bool go_home) {
@@ -226,11 +341,25 @@ void end(bool go_home) {
     Mode mode = g_mode;
     g_mode = Mode::Off;
     pilot::away(nullptr);
-    if (mode == Mode::Queries) release_car(go_home);
+    sa::CVehicle *car = g_car >= 0 ? sa::GetVehicle(g_car) : nullptr;
+    if (car && car->matrix) g_home = car->matrix->pos;  // it can have been pushed
+    release_car(go_home);  // its ground first
     sa::CPed *cj = sa::FindPlayerPed();
     if (mode != Mode::Body || !cj) return;
     sa::entity_flags(cj) = (sa::entity_flags(cj) & ~(sa::kEntityUsesCollision | sa::kEntityVisible)) |
                            (g_saved_flags & (sa::kEntityUsesCollision | sa::kEntityVisible));
+    if (g_seated && car) {  // back behind the wheel, home or not ("Move CJ here" takes the car along)
+        sa::WarpIntoCarAsDriver(cj, car);
+        bool in = sa::FindPlayerVehicle() == car;
+        fpvlog::write("standin: over, CJ back in his vehicle%s", in ? "" : " (FAILED)");
+        void *audio = reinterpret_cast<uint8_t *>(car) + kVehicleAudio;
+        if (!in && g_radio_kept && audio_vehicle(audio) == car) {  // on foot after all: the radio goes off
+            g_radio_kept = false;
+            reinterpret_cast<void(__attribute__((thiscall)) *)(void *)>(g.radio_off)(audio);
+        }
+        return;
+    }
+    if (g_seated) fpvlog::write("standin: CJ's vehicle is gone; he stays on foot");
     if (!go_home) {
         fpvlog::write("standin: over, CJ stays at the drone");
         return;

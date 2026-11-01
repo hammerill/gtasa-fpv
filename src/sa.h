@@ -335,6 +335,45 @@ inline void ForceWeatherNow(int16_t type) {
 inline uint8_t &vehicle_created_by(CVehicle *v) { return reinterpret_cast<uint8_t *>(v)[0x4A4]; }
 constexpr uint8_t kVehicleRandom = 1, kVehicleMission = 2, kVehicleParked = 3;
 
+// CVehicle::m_pDriver.
+inline CPed *vehicle_driver(CVehicle *v) { return *reinterpret_cast<CPed **>(reinterpret_cast<uint8_t *>(v) + 0x460); }
+
+// CPedIntelligence::FlushImmediately(bool set_default_task) on CPed::m_pIntelligence (+0x47C).
+// WARP_CHAR_FROM_CAR_TO_COORD (0x482EFC) calls it with true to take a ped out of
+// his car on the spot (the car task aborts at once), then teleports him.
+inline void FlushImmediately(CPed *p, bool set_default_task) {
+    void *intelligence = *reinterpret_cast<void **>(reinterpret_cast<uint8_t *>(p) + 0x47C);
+    if (intelligence)
+        reinterpret_cast<void(__attribute__((thiscall)) *)(void *, bool)>(0x601640)(intelligence, set_default_task);
+}
+
+// As WARP_CHAR_INTO_CAR (0x483267): FlushImmediately(false), then a stack
+// CTaskSimpleCarSetPedInAsDriver(car, no line-up task) with m_bIsWarping (+0x1C)
+// set, ProcessPed(ped), and its (non-deleting) destructor.
+inline void WarpIntoCarAsDriver(CPed *p, CVehicle *car) {
+    alignas(8) uint8_t task[0x40] = {};
+    FlushImmediately(p, false);
+    reinterpret_cast<void(__attribute__((thiscall)) *)(void *, CVehicle *, void *)>(0x6470E0)(task, car, nullptr);
+    task[0x1C] = 1;
+    reinterpret_cast<bool(__attribute__((thiscall)) *)(void *, CPed *)>(0x64B950)(task, p);
+    reinterpret_cast<void(__attribute__((thiscall)) *)(void *)>(0x647170)(task);
+}
+
+// CTheScripts::IsPlayerOnAMission (its code is behind the crack's stub at
+// 0x464D50): OnAMissionFlag (0xA476AC) is an offset into ScriptSpace (0xA49960).
+inline bool on_a_mission() {
+    int offset = *reinterpret_cast<volatile int *>(0xA476AC);
+    return offset > 0 && *reinterpret_cast<volatile int *>(0xA49960 + offset) != 0;
+}
+
+// CPed::GetTransformedBonePosition(RwV3d&, bone, update_skin), thiscall: world space.
+inline CVector bone_position(CPed *p, int bone) {
+    CVector out{};
+    reinterpret_cast<void(__attribute__((thiscall)) *)(CPed *, CVector &, int, bool)>(0x5E01C0)(p, out, bone, true);
+    return out;
+}
+constexpr int kBoneHead = 5;  // ePedBones 5: the head (8 is the jaw)
+
 // CVehicle::m_nVehicleSubType (3 = heli, as the CHeli constructor sets it at
 // 0x6C41E9), CAutomobile::m_fHeliRotorSpeed (CHeli::ProcessControl's
 // downwash is at full power from 0.15), CPhysical::m_fMass (kg).
@@ -345,6 +384,14 @@ constexpr uint32_t kVehicleHeli = 3;
 inline float heli_rotor_speed(const CVehicle *v) {
     return *reinterpret_cast<const float *>(reinterpret_cast<const uint8_t *>(v) + 0x84C);
 }
+// CAutomobile and the classes built on it (not bikes, boats or trains).
+inline bool is_automobile(const CVehicle *v) {
+    uint32_t t = vehicle_subtype(v);
+    return t <= 4 || t == 11;  // automobile, monster truck, quad, heli, plane, trailer
+}
+// CAutomobile::PlaceOnRoadProperly (thiscall): its wheels on the ground under them, heading
+// kept, as the script's SET_CAR_COORDINATES does. 1.0 US starts it with a jump stub.
+inline void PlaceOnRoadProperly(CVehicle *v) { reinterpret_cast<void(__attribute__((thiscall)) *)(CVehicle *)>(0x6AF420)(v); }
 inline float mass_of(const CEntity *e) { return *reinterpret_cast<const float *>(reinterpret_cast<const uint8_t *>(e) + 0x8C); }
 
 // An entity's collision box (CEntity::GetColModel 0x535300 for non-vehicles:

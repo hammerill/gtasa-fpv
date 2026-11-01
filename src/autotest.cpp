@@ -16,7 +16,10 @@
 // builds: "boom" (bomb arm switch on, then cruise into whatever is ahead),
 // "boomsw" (explode switch at 9 s; boomsw=<s> at that time), "signal" / "cutscene" (ending view), dur=<s> (its
 // duration), then=respawn|recall|nothing, endact=r|y|f7 with endwait=<s> (the player's
-// respawn / Move CJ here / exit that long after the blast, game time).
+// respawn / Move CJ here / exit that long after the blast, game time), "incar" (CJ is
+// warped into the nearest car, put beside him, before the launch: the stand-in from a vehicle),
+// pickup=<s> (at that flight time, a pistol pickup 1 s ahead on the drone's path; its state and
+// CJ's pistol ammo are logged). While flying, the peds looking at CJ (IK look-at) are logged every 2 s.
 #include "autotest.h"
 
 #include <windows.h>
@@ -44,7 +47,8 @@ struct Config {
     std::vector<float> shots;
     bool teleport = false;
     int wanted = -1, hour = -1, weather = -2;  // weather -2: untouched
-    float ped_at = 0, car_at = 0;
+    float ped_at = 0, car_at = 0, pickup_at = 0;
+    bool in_car = false;
     float at[4] = {};
     char end_action = 0;  // 'r', 'y' or '7' during a blast's ending
     float end_action_at = 1;
@@ -92,6 +96,8 @@ void read_config() {
     if (const char *p = std::strstr(buf, "yawdur=")) g_cfg.yaw_secs = float(std::atof(p + 7));
     if (const char *p = std::strstr(buf, "ped=")) g_cfg.ped_at = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "car=")) g_cfg.car_at = float(std::atof(p + 4));
+    if (const char *p = std::strstr(buf, "pickup=")) g_cfg.pickup_at = float(std::atof(p + 7));
+    g_cfg.in_car = std::strstr(buf, "incar") != nullptr;
     if (const char *p = std::strstr(buf, "time=")) g_cfg.hour = std::atoi(p + 5);
     if (const char *p = std::strstr(buf, "weather=")) g_cfg.weather = std::atoi(p + 8);
     if (const char *p = std::strstr(buf, "wanted=")) g_cfg.wanted = std::atoi(p + 7);
@@ -265,8 +271,96 @@ void hold_target() {
     if (g_target_car) sa::move_speed(ped) = {0, 0, 0};
 }
 
+// The nearest car, beside CJ, and CJ in it behind the wheel.
+void put_cj_in_car() {
+    sa::CPed *cj = sa::FindPlayerPed();
+    sa::Pool *pool = sa::vehicle_pool();
+    if (!cj || !cj->matrix || !pool || sa::FindPlayerVehicle()) return;
+    sa::CVector c = cj->position(), r = cj->matrix->right;
+    sa::CVehicle *best = nullptr;
+    float best_d = 1e9f;
+    for (int i = 0; i < pool->size; ++i) {
+        if (pool->flags[i] & 0x80) continue;
+        auto *v = reinterpret_cast<sa::CVehicle *>(pool->objects + i * sa::kVehicleSize);
+        if (v->vtable != reinterpret_cast<void *>(0x871120)) continue;  // cars only
+        sa::CVector p = v->position();
+        float d = (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y);
+        if (d < best_d) best_d = d, best = v;
+    }
+    if (!best || best_d > 30 * 30) {  // none around: a Greenwood (492), a random car as far as the population knows
+        reinterpret_cast<void(__cdecl *)(int, int)>(0x4087E0)(492, 0x10);           // CStreaming::RequestModel
+        reinterpret_cast<void(__cdecl *)(bool)>(0x40EA10)(false);                 // LoadAllRequestedModels
+        using Create = sa::CVehicle *(__cdecl *)(int, sa::CVector, uint8_t);      // CCarCtrl::CreateCarForScript
+        best = reinterpret_cast<Create>(0x431F80)(492, {c.x + r.x * 3, c.y + r.y * 3, c.z + 0.5f}, 0);
+        if (!best) {
+            fpvlog::write("autotest: no car for CJ");
+            return;
+        }
+        sa::vehicle_created_by(best) = sa::kVehicleRandom;
+        fpvlog::write("autotest: created a car for CJ");
+    }
+    if (sa::CPed *driver = sa::vehicle_driver(best)) {  // traffic: its driver gets out and walks
+        sa::FlushImmediately(driver, true);
+        fpvlog::write("autotest: the car's driver %s", sa::vehicle_driver(best) ? "stayed in (FAILED)" : "got out");
+        if (sa::vehicle_driver(best)) return;
+    }
+    uint8_t &status = reinterpret_cast<uint8_t *>(best)[0x36];  // parked (abandoned), not traffic
+    status = uint8_t((status & 7) | (4 << 3));
+    sa::Teleport(best, {c.x + r.x * 3, c.y + r.y * 3, c.z + 0.5f}, true);
+    sa::SetHeading(best, std::atan2(-cj->matrix->forward.x, cj->matrix->forward.y));
+    sa::move_speed(best) = {0, 0, 0};
+    sa::WarpIntoCarAsDriver(cj, best);
+    fpvlog::write("autotest: CJ in car %d (%s)", sa::GetVehicleRef(best),
+                  sa::FindPlayerVehicle() == best ? "driving" : "FAILED");
+}
+
+int g_pickup = -1;
+inline int pistol_ammo(sa::CPed *cj) { return *reinterpret_cast<int *>(reinterpret_cast<uint8_t *>(cj) + 0x5A0 + 2 * 0x1C + 0xC); }
+inline uint8_t pickup_type(int handle) { return reinterpret_cast<uint8_t *>(0x9788C0 + (handle & 0xFFFF) * 0x20)[0x1C]; }
+
+void place_pickup() {
+    sa::CPed *cj = sa::FindPlayerPed();
+    if (!cj) return;
+    const fpv_frame &f = drone::last_frame();
+    // CPickups::GenerateNewOne_WeaponType(pos, WEAPON_PISTOL, PICKUP_ONCE, ammo, empty, message)
+    using Fn = int(__cdecl *)(sa::CVector, int, uint8_t, unsigned, bool, char *);
+    sa::CVector at{f.position[0] + f.velocity[0], f.position[1] + f.velocity[1], f.position[2] + f.velocity[2]};
+    g_pickup = reinterpret_cast<Fn>(0x457380)(at, 22, 3, 34, false, nullptr);
+    fpvlog::write("autotest: pickup %08X (type %d) at %.2f %.2f %.2f, CJ's pistol ammo %d", unsigned(g_pickup),
+                  g_pickup >= 0 ? pickup_type(g_pickup) : -1, at.x, at.y, at.z, pistol_ammo(cj));
+}
+
+// Which peds within 60 m look at CJ (IKChainManager_c::GetLookAtEntity on g_ikChainMan).
+void log_lookers(float t) {
+    sa::CPed *cj = sa::FindPlayerPed();
+    sa::Pool *pool = sa::ped_pool();
+    if (!cj || !pool) return;
+    using Fn = sa::CEntity *(__attribute__((thiscall)) *)(void *, sa::CPed *);
+    const fpv_frame &fr = drone::last_frame();
+    sa::CVector d{fr.position[0], fr.position[1], fr.position[2]};
+    int nearby = 0, looking = 0;
+    for (int i = 0; i < pool->size; ++i) {
+        if (pool->flags[i] & 0x80) continue;
+        auto *ped = reinterpret_cast<sa::CPed *>(pool->objects + i * sa::kPedSize);
+        if (ped == cj) continue;
+        sa::CVector p = ped->position();
+        if ((p.x - d.x) * (p.x - d.x) + (p.y - d.y) * (p.y - d.y) > 60 * 60) continue;
+        ++nearby;
+        if (reinterpret_cast<Fn>(0x6181D0)(reinterpret_cast<void *>(0xC15448), ped) == cj) ++looking;
+    }
+    sa::CVector head = cj->matrix ? sa::bone_position(cj, sa::kBoneHead) : sa::CVector{};
+    fpvlog::write("autotest: %.0f s: %d of %d peds near the drone look at CJ; his head %.2f %.2f %.2f, drone %.2f %.2f "
+                  "%.2f%s", t, looking, nearby, head.x, head.y, head.z, d.x, d.y, d.z,
+                  sa::FindPlayerVehicle() ? ", CJ in a vehicle" : "");
+    if (g_pickup >= 0)
+        fpvlog::write("autotest: pickup type %d, CJ's pistol ammo %d", pickup_type(g_pickup), pistol_ammo(cj));
+}
+
 void launch() {
     g_target = 0;
+    g_pickup = -1;
+    if (g_cfg.in_car) put_cj_in_car();
+
     if (g_cfg.ped_at > 0) place_target_ped(g_cfg.ped_at);
     if (g_cfg.car_at > 0) place_target_car(g_cfg.car_at);
     if (fpvapi::load() && fpvapi::kamikaze())  // the player ticks it in F8 > Fly
@@ -349,6 +443,10 @@ void tick() {
     if (!drone::ending()) g_blast_ms = 0;  // a new blast may follow a respawn
     sticks(t);
     hold_target();
+    static float next_log = 0;
+    if (t < 1) next_log = 2;
+    if (g_cfg.pickup_at > 0 && t >= g_cfg.pickup_at) g_cfg.pickup_at = 0, place_pickup();
+    if (t >= next_log) next_log += 2, log_lookers(t);
     if (g_next_shot < g_cfg.shots.size() && t >= g_cfg.shots[g_next_shot]) {
         ++g_next_shot;
         request_shot();

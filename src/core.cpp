@@ -155,6 +155,7 @@ void tick() {
     ensure_hooks();
     if (key_pressed(VK_F7)) drone::toggle();
     autotest::tick();
+    standin::tick();
     drone::tick();
 }
 

@@ -2,10 +2,14 @@
 // once the drone is 20 m from CJ, CJ himself goes along with it, hidden,
 // frozen, collision-less and untouchable, so peds, gangs, police, traffic,
 // population and streaming all see "CJ" right where the quad is. Back under
-// 10 m from his spot, he goes home. In a vehicle he stays put and only the
-// FindPlayer* queries (streaming, population, traffic) follow the drone; his
-// car is held at its spot and kept from the population's clean-up meanwhile.
-// He still shows at his spot (pilot.cpp: moved home for the render passes).
+// 10 m from his spot, he goes home. Driving a vehicle, he gets out of it on
+// the spot to stand in the same way, and back in behind the wheel afterwards;
+// meanwhile his car is held at its spot while the drone is far (its ground's
+// collision streams out) and kept from the population's clean-up. On a mission
+// or as a passenger he stays in it, and only the FindPlayer* queries
+// (streaming, population, traffic) follow the drone.
+// He still shows at his spot or in his seat (pilot.cpp: moved there for the
+// render passes).
 #pragma once
 
 namespace standin {
@@ -20,6 +24,7 @@ void update(const float drone_pos[3]);
 void end(bool go_home);
 
 bool on();
+void tick();  // every frame, the stand-in on or off
 
 // Where CJ really is (his spot while he stands in), for the GPS home.
 void home(float out[3]);

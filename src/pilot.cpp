@@ -35,6 +35,13 @@ inline const void *block(int index) { return reinterpret_cast<const void *>(0xB5
 inline int GetAnimationBlockIndex(const char *name) { return reinterpret_cast<int(__cdecl *)(const char *)>(0x4D3990)(name); }
 inline void RequestModel(int id, int flags) { reinterpret_cast<void(__cdecl *)(int, int)>(0x4087E0)(id, flags); }
 inline void AddAnimBlockRef(int index) { reinterpret_cast<void(__cdecl *)(int)>(0x4D3FB0)(index); }
+inline void RemoveAnimBlockRef(int index) { reinterpret_cast<void(__cdecl *)(int)>(0x4D3FD0)(index); }
+// A clump's CAnimBlendAssociations: hierarchy +0x14, blend amount +0x18, flags +0x2E
+// (the constructor at 0x4CEFC0); CAnimBlendHierarchy's anim block id +0xC (-1: none).
+inline uint8_t *FirstAssociation(void *clump) { return reinterpret_cast<uint8_t *(__cdecl *)(void *)>(0x4D15E0)(clump); }
+inline uint8_t *NextAssociation(uint8_t *a) { return reinterpret_cast<uint8_t *(__cdecl *)(uint8_t *)>(0x4D6AB0)(a); }
+constexpr uint16_t kAnimPartial = 0x10;
+inline int anim_block_of(void *hierarchy) { return *reinterpret_cast<int *>(static_cast<uint8_t *>(hierarchy) + 0xC); }
 inline void *GetAnimation(const char *name, const void *anim_block) {
     return reinterpret_cast<void *(__cdecl *)(const char *, const void *)>(0x4D42F0)(name, anim_block);
 }
@@ -91,7 +98,12 @@ sa::CPed *g_posed = nullptr;  // CJ, in the pose
 bool g_away = false;  // CJ's real position is at the drone
 sa::CVector g_home{};
 bool g_swapped = false;  // CJ is at home for this frame's render passes
+sa::CVector g_saved_axes[3]{};
 sa::CVector g_saved_pos{};
+
+bool g_seated = false;  // from a vehicle: home is his seat in it
+Seat g_seat{};
+int g_seat_block = -1;  // our ref on the seat anim's block
 
 void *g_kept_clump = nullptr;
 unsigned g_kept = 0;  // bit i: we flagged kKeptBones[i]
@@ -148,16 +160,38 @@ void release() {
     g_posed = nullptr;
     free_bones(cj && cj == sa::FindPlayerPed() ? rw_object(cj) : nullptr);
     if (!cj || cj != sa::FindPlayerPed() || !rw_object(cj)) return;
+    if (sa::FindPlayerVehicle()) return;  // back in his car: its own anims
     BlendAnimation(rw_object(cj), motion_group(cj), kAnimIdle, 4.0f);  // the pose fades out and is deleted
     fpvlog::write("pilot: pose released");
+}
+
+sa::CVector to_world(const sa::CMatrix &m, const sa::CVector &v) {
+    return {m.right.x * v.x + m.forward.x * v.y + m.up.x * v.z, m.right.y * v.x + m.forward.y * v.y + m.up.y * v.z,
+            m.right.z * v.x + m.forward.z * v.y + m.up.z * v.z};
 }
 
 void swap_in() {
     if (!g_away || g_swapped) return;
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj || !cj->matrix || sa::FindPlayerVehicle()) return;
-    g_saved_pos = cj->matrix->pos;
-    cj->matrix->pos = g_home;
+    sa::CMatrix &m = *cj->matrix;
+    sa::CVehicle *car = nullptr;
+    if (g_seated) {  // in his seat, or not at all (car gone, or no anim to sit with)
+        car = g_seat.car >= 0 ? sa::GetVehicle(g_seat.car) : nullptr;
+        if (!car || !car->matrix || !g_seat.anim) return;
+    }
+    g_saved_axes[0] = m.right, g_saved_axes[1] = m.forward, g_saved_axes[2] = m.up;
+    g_saved_pos = m.pos;
+    if (car) {
+        const sa::CMatrix &c = *car->matrix;
+        m.right = to_world(c, g_seat.axes[0]);
+        m.forward = to_world(c, g_seat.axes[1]);
+        m.up = to_world(c, g_seat.axes[2]);
+        sa::CVector o = to_world(c, g_seat.offset);
+        m.pos = {c.pos.x + o.x, c.pos.y + o.y, c.pos.z + o.z};
+    } else {
+        m.pos = g_home;
+    }
     sa::entity_flags(cj) |= sa::kEntityVisible;
     UpdateRW(cj);
     UpdateRwFrame(cj);
@@ -172,6 +206,7 @@ void swap_out() {
     g_swapped = false;
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj || !cj->matrix) return;
+    cj->matrix->right = g_saved_axes[0], cj->matrix->forward = g_saved_axes[1], cj->matrix->up = g_saved_axes[2];
     cj->matrix->pos = g_saved_pos;
     // The renderer judged him at home, maybe off screen; CEntity::UpdateAnim
     // then only moves his root. At the drone he is in view: full updates.
@@ -359,7 +394,8 @@ void __cdecl render_effects_hook() {
     reinterpret_cast<void(__cdecl *)()>(g.render_effects)();
     if (g_posed && !drone::active()) release();
     sa::CPed *cj = sa::FindPlayerPed();
-    if (g_posed && cj == g_posed && cj->matrix && !sa::FindPlayerVehicle() && (!g_away || g_swapped)) draw_radio(cj);
+    if (g_posed && cj == g_posed && cj->matrix && !sa::FindPlayerVehicle() && !g_seated && (!g_away || g_swapped))
+        draw_radio(cj);  // not in a car seat: his hands are on the wheel
     swap_out();
 }
 
@@ -375,17 +411,49 @@ void install_hooks() {
 
 void hold(sa::CPed *cj) {
     swap_out();  // a frame that never reached RenderEffects
-    if (!cj || !rw_object(cj) || !load_anim()) return;
+    if (!cj || !rw_object(cj)) return;
+    if (g_seated) {  // still sitting, as in his car (bones as the anim has them)
+        if (!g_seat.anim) return;
+        free_bones(rw_object(cj));
+        BlendAnimation(rw_object(cj), g_seat.anim, kAnimStarted | kAnimLooped, 4.0f);
+        if (g_posed != cj) fpvlog::write("pilot: CJ seated (from his vehicle)");
+        g_posed = cj;
+        return;
+    }
+    if (!load_anim()) return;
     keep_bones(rw_object(cj));  // before the pose blends in: they keep the idle's rotations
     BlendAnimation(rw_object(cj), g_anim, kAnimStarted | kAnimLooped, 4.0f);
     if (g_posed != cj) fpvlog::write("pilot: CJ in the pilot's pose");
     g_posed = cj;
 }
 
-void away(const sa::CVector *home) {
+void *seat_anim(sa::CPed *cj) {
+    void *clump = cj ? rw_object(cj) : nullptr;
+    if (!clump) return nullptr;
+    void *best = nullptr;
+    float best_blend = 0.05f;
+    for (uint8_t *a = FirstAssociation(clump); a; a = NextAssociation(a)) {
+        if (*reinterpret_cast<uint16_t *>(a + 0x2E) & kAnimPartial) continue;  // steering, looking back
+        float blend = *reinterpret_cast<float *>(a + 0x18);
+        void *h = *reinterpret_cast<void **>(a + 0x14);
+        if (h && blend > best_blend) best = h, best_blend = blend;
+    }
+    return best;
+}
+
+void away(const sa::CVector *home, const Seat *seat) {
     swap_out();
+    if (g_seat_block >= 0) RemoveAnimBlockRef(g_seat_block), g_seat_block = -1;
+    // Leaving a seat: CJ is put back in his car, whose task owns his anims now.
+    if (g_seated && !seat) g_posed = nullptr;
     g_away = home != nullptr;
     if (home) g_home = *home;
+    g_seated = home && seat;
+    g_seat = g_seated ? *seat : Seat{-1, {}, {}, nullptr};
+    if (g_seat.anim && anim_block_of(g_seat.anim) >= 0) {  // a bike's or a lowrider's block can be streamed out
+        g_seat_block = anim_block_of(g_seat.anim);
+        AddAnimBlockRef(g_seat_block);
+    }
 }
 
 }  // namespace pilot

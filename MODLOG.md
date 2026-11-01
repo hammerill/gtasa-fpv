@@ -291,3 +291,68 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
     mission (2) until the stand-in ends. Every return home (car or CJ) and "Move CJ here"
     calls CColStore::EnsureCollisionIsInMemory (0x410AD0) after LoadScene: it requests the col files covering the
     point and loads them right away.
+
+- 2026-10-31 (night): **stand-in from a vehicle works like on foot** (user: peds should look at the drone as if it
+  were CJ, and pickups should work, also when he flies from a car). Built and deployed, **not yet verified in game**
+  (the user was at the keyboard).
+  - Why it didn't: Queries mode (CJ stays in his car) moves only FindPlayer*. CPickup::Update (0x457410) tests a
+    player in a vehicle with CVehicle::IsSphereTouchingVehicle on his car, on foot with his ped position (|dz| < 2,
+    xy distance); peds' looks (IKChainManager_c, g_ikChainMan 0xC15448) go for his ped's head bone.
+  - Now, driving (not a passenger, not on a mission: OnAMissionFlag 0xA476AC into ScriptSpace 0xA49960, since
+    IsPlayerOnAMission 0x464D50 is behind a crack stub), CJ gets out on the spot as WARP_CHAR_FROM_CAR_TO_COORD
+    does (0x482EFC: CPedIntelligence::FlushImmediately(true) 0x601640, intelligence at +0x47C) and stands in in Body
+    mode. Back behind the wheel at the end as WARP_CHAR_INTO_CAR does (0x483267: FlushImmediately(false), stack
+    CTaskSimpleCarSetPedInAsDriver(car, null) 0x6470E0 with +0x1C warp set, ProcessPed 0x64B950, dtor 0x647170),
+    also before Move CJ here (so the car still goes along). The car keeps the earlier hold/mission-car logic.
+    Still Queries mode when on a mission, as a passenger, or if he didn't get out.
+  - pilot.cpp draws him in his seat: his matrix in the car's frame is kept from the moment he got out, and the anim
+    he sat with (the strongest non-partial association: hierarchy +0x14, blend +0x18, flags +0x2E, ctor 0x4CEFC0;
+    a ref on its block, CAnimBlendHierarchy +0xC) is blended every step instead of betslp_loop. No radio there.
+  - Placement: his head bone (5, CPed::GetTransformedBonePosition 0x5E01C0) is put on the drone, not his root, so
+    the look-at IK aims right at the quad; FindPlayerCoors is still the drone.
+  - autotest: "incar" (nearest empty car beside CJ, warped in before the launch), pickup=<m> (pistol pickup on the
+    path at cruise height; its type byte +0x1C and CJ's pistol ammo logged), and every 2 s the count of peds within
+    60 m whose look-at entity is CJ. To verify: `at=2490,-1668,13.4,0 incar pickup=30 secs=20 shots=12` (Grove St).
+- 2026-11-01: the car radio keeps playing while CJ is out of his car standing in. CAEVehicleAudioEntity::Service
+  (0x502280) calls TurnOffRadioForVehicle (0x4F5B60, site 0x5023A3) the frame the player stops driving and
+  TurnOnRadioForVehicle (0x4F5B20, site 0x50237C; it sets the radio globals 0xB6B98C driver / 0xB6B99C settings
+  and calls CAudioEngine::StartRadio) when he drives again. Both redirected in standin.cpp: "off" is skipped for
+  CJ's car in a seated stand-in (logged "radio kept on"), the next "on" for that car is skipped (still playing;
+  logged), and if the warp back in fails the "off" runs then. The audio entity is CVehicle +0x138 (Initialise at
+  0x6B12E4), its vehicle at +0x4. Built and deployed with the kamikaze libfpv.
+  - Launching from WSL: `cmd /c start` and `explorer.exe gta_sa.exe` both left a GTA_SA.exe with no window
+    (about 11 MB, stuck; the first had loaded the ASIs). The gtasa-fpv-test scheduled task no longer exists, and
+    re-creating it was blocked by the session's permission rules.
+- 2026-11-01: stand-in from a vehicle **verified in game** (kamikaze libfpv, LSIA runway at 1700,-2493 heading 270,
+  autotest `incar`: no empty car near Grove St, so it creates a Greenwood (CCarCtrl::CreateCarForScript 0x431F80,
+  set to a random car) or takes a traffic car after its driver gets out):
+  - At 20 m: "CJ out of his vehicle (seat anim found)", "radio kept on"; his head bone within 0.1 m of the drone
+    for the whole stand-in. A pistol pickup dropped on the drone's path (autotest pickup=<s>: at that time, 1 s
+    ahead) was collected: pickup gone, CJ's pistol ammo 0 -> 34.
+  - Looking back from 13 m: CJ drawn seated behind the wheel of the parked car.
+  - End of flight: "CJ back in his vehicle", "radio still on" (the next TurnOnRadio skipped).
+  - Not shown: peds' look-at counts. Grove St (north: houses) and Pershing Square (a wall at x 1453) stopped the
+    scripted flight inside 20 m, and the runway has no peds. The placement puts his head on the drone; the
+    look-at itself is up to the user's own flight.
+- 2026-11-01: the weather wind floor (kCalmMps) is 0.5 m/s, a quarter of the 2 m/s before (user: too windy when
+  calm). Deployed; not flown yet with weather 0.
+- 2026-11-01: user: peds react fine to the stand-in. New bug: fly 100-200 m from the car, then F7, and the car
+  is on its back. Traced the car's pose (temporary `DEBUG car` log lines in standin.cpp, plus
+  standin::debug_tick from core.cpp for 4 s after the stand-in ends):
+  - LSIA runway: nothing. It was held level and stayed level after CJ got back in.
+  - The user's rooftop (2044.6,-1401,68.5, autotest `at=2044.6,-1401.0,68.5,175 incar secs=28 height=5
+    pitch=0.8`): held level too, but on release (CJ warped back in) its first physics step shoved it up 0.4-0.55 m
+    in one frame (a push-out, not speed: move speed only 0.06-0.09) and it rolled 17 deg in 7 ms; in the user's
+    flight it rolled to 60 deg and back, the direction differing from run to run.
+  - What we saw: CAutomobile's wheel compression (+0x7D4, 1 = off the ground) goes to 1.00 on all wheels the
+    frame CJ gets out, the car free and the ground loaded: an empty car isn't simulated, it hangs in its pose.
+    A hover test (never 100 m away, so never held) came back cleanly. After a hold it didn't, even with the
+    roof's collision loaded again (line probes hit it at 67.3 under every corner).
+  - Tried, didn't help: CAutomobile::Teleport (vtable 14, 0x6A9CA0) to the held pose; restoring a snapshot of
+    the wheel contact state (m_wheelColPoint[4] 0x724, compression 0x7D4 and the next array: it read 1.00
+    already); CAutomobile::PlaceOnRoadProperly (0x6AF420, a jump stub in this exe) alone: level at 68.10, but
+    still thrown 1 m up on the first step.
+  - Fix, **verified** (3 rooftop runs in a row, the car still to the cm, wheels 0.85-0.87 after): a held car, on
+    release or when the drone comes back near, is put down with PlaceOnRoadProperly, then pinned in that pose
+    (speeds zeroed) for 500 ms of game time by standin::tick (every frame, from core.cpp) while its wheels find
+    the ground. Logged as "standin: CJ's car set down at ...". The debug tracing is gone.

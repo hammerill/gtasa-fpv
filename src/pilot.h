@@ -18,7 +18,20 @@ void install_hooks();
 // Every drone step while CJ flies the drone on foot: the pose (and radio).
 void hold(sa::CPed *cj);
 
-// Body stand-in on (home: CJ's spot, his real position is at the drone) or off (null).
-void away(const sa::CVector *home);
+// CJ's seat while he stands in from a vehicle: he is out of it (at the
+// drone), and drawn sitting there in the anim he had, instead of at a spot.
+struct Seat {
+    int car;               // script handle
+    sa::CVector axes[3];   // his right, forward, up in the car's frame
+    sa::CVector offset;    // his position in the car's frame
+    void *anim;            // CAnimBlendHierarchy* he sat with (null: not drawn)
+};
+
+// The full-body anim CJ plays in his vehicle now (the strongest one), or null.
+void *seat_anim(sa::CPed *cj);
+
+// Body stand-in on (home: CJ's spot, his real position is at the drone; seat:
+// from a vehicle) or off (null).
+void away(const sa::CVector *home, const Seat *seat = nullptr);
 
 }  // namespace pilot
