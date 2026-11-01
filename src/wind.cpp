@@ -17,9 +17,9 @@ namespace {
 constexpr float kStormMps = 11.0f;
 // The extra sunny weathers have Wind 0, dead calm everywhere, while the
 // game's wind sound still blows up high (it scales with the camera's
-// height). Real air is never that still: a light breeze at least, which
-// libfpv makes about 4 m/s on top of Maze Bank.
-constexpr float kCalmMps = 2.0f;
+// height). Real air is never that still: a faint breeze at least, which
+// libfpv makes about 1 m/s on top of Maze Bank (2 m/s here felt too windy).
+constexpr float kCalmMps = 0.5f;
 // WindDir wobbles over 1-2 s by script, the same everywhere: libfpv makes
 // the gusts, so only its slow mean direction is passed on.
 constexpr float kDirSeconds = 4.0f;
