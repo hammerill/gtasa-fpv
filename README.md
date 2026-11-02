@@ -1,6 +1,6 @@
 # GTA San Andreas FPV
 
-<p><img src="gtasa-fpv.gif" alt="GTA SA FPV" width=512></p>
+<p><a href="https://www.youtube.com/watch?v=tsXKFhD8TOw"><img src="gtasa-fpv.gif" alt="GTA SA FPV" width=512></a></p>
 
 Fly an FPV drone through San Andreas with your own radio. Press F7 and CJ
 launches a quad from the ground in front of him. It is simulated by
