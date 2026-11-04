@@ -26,6 +26,10 @@ void update(const float drone_pos[3]);
 void end(bool go_home);
 
 bool on();
+
+// While CJ himself is at the drone: the point peds aim at when they shoot at
+// him (his spine, CWeapon::FireInstantHit), kept at the drone.
+bool aim_point(float out[3]);
 void tick();  // every frame, the stand-in on or off
 
 // Where CJ really is (his spot while he stands in), for the GPS home.

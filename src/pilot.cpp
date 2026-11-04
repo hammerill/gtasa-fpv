@@ -17,6 +17,10 @@ namespace {
 // Idle (0x53E920): the render list is built, then PreRender, shadows, RenderScene, RenderEffects.
 constexpr sa::CallSite kIdleConstructRenderList = {0x53E9F9, 0x5556E0};  // CRenderer::ConstructRenderList()
 constexpr sa::CallSite kIdleRenderEffects = {0x53EAD3, 0x53E170};        // RenderEffects()
+// Between them: peds aim their guns (arm IK at the target's bones) and fire
+// (CPedIntelligence::ProcessAfterPreRender -> CTaskSimpleUseGun::SetPedPosition
+// -> FireGun -> CWeapon::FireInstantHit, aimed at the target's spine bone).
+constexpr sa::CallSite kIdlePedsAfterPreRender = {0x53EA03, 0x563430};  // CWorld::ProcessPedsAfterPreRender()
 
 // The pose: otb.ifp (anim.img), a punter at the off-track betting shop
 // reading his slip: standing, head down, both hands in front at the waist,
@@ -87,7 +91,7 @@ constexpr int kBoneNeck = 5, kBoneHead = 8, kBoneRightHand = 24, kBoneRightFinge
 constexpr int kKeptBones[] = {4, 5, 6, 7, 8, 201, 301, 302};
 
 struct Original {
-    uintptr_t construct_render_list, render_effects;
+    uintptr_t construct_render_list, render_effects, peds_after_prerender;
 };
 Original g;
 
@@ -201,7 +205,7 @@ void swap_in() {
     g_swapped = true;
 }
 
-void swap_out() {
+void swap_out(bool bones = false) {
     if (!g_swapped) return;
     g_swapped = false;
     sa::CPed *cj = sa::FindPlayerPed();
@@ -213,6 +217,7 @@ void swap_out() {
     sa::entity_flags(cj) &= ~(sa::kEntityVisible | kEntityOffscreen);
     UpdateRW(cj);
     UpdateRwFrame(cj);
+    if (bones) UpdateRpHAnim(cj);  // his skeleton at the drone too, for what reads it now
 }
 
 // --- The radio: a small procedural transmitter between CJ's hands ---
@@ -389,6 +394,16 @@ void __cdecl construct_render_list_hook() {
     reinterpret_cast<void(__cdecl *)()>(g.construct_render_list)();
 }
 
+// Idle -> CWorld::ProcessPedsAfterPreRender(): the peds aim and shoot at CJ's
+// bones, so CJ is at the drone meanwhile, skeleton and all (at home they
+// twisted their arms towards his spot and shot that way), then home again.
+void __cdecl peds_after_prerender_hook() {
+    bool swapped = g_swapped;
+    swap_out(true);
+    reinterpret_cast<void(__cdecl *)()>(g.peds_after_prerender)();
+    if (swapped) swap_in();
+}
+
 // Idle -> RenderEffects(): the world is drawn; the radio goes in, CJ back to the drone.
 void __cdecl render_effects_hook() {
     reinterpret_cast<void(__cdecl *)()>(g.render_effects)();
@@ -396,7 +411,7 @@ void __cdecl render_effects_hook() {
     sa::CPed *cj = sa::FindPlayerPed();
     if (g_posed && cj == g_posed && cj->matrix && !sa::FindPlayerVehicle() && !g_seated && (!g_away || g_swapped))
         draw_radio(cj);  // not in a car seat: his hands are on the wheel
-    swap_out();
+    swap_out(true);  // the world's update reads his bones too (gunners, melee): at the drone
 }
 
 }  // namespace
@@ -406,7 +421,10 @@ void install_hooks() {
                                                    reinterpret_cast<void *>(&construct_render_list_hook));
     g.render_effects = patch::redirect_call(kIdleRenderEffects.site, kIdleRenderEffects.fn,
                                             reinterpret_cast<void *>(&render_effects_hook));
-    fpvlog::write("pilot: hooks render list %d, effects %d", g.construct_render_list != 0, g.render_effects != 0);
+    g.peds_after_prerender = patch::redirect_call(kIdlePedsAfterPreRender.site, kIdlePedsAfterPreRender.fn,
+                                                  reinterpret_cast<void *>(&peds_after_prerender_hook));
+    fpvlog::write("pilot: hooks render list %d, effects %d, peds after prerender %d", g.construct_render_list != 0,
+                  g.render_effects != 0, g.peds_after_prerender != 0);
 }
 
 void hold(sa::CPed *cj, bool pose) {

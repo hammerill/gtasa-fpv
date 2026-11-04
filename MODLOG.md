@@ -415,3 +415,21 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
   player's in the pilot view, with the game's own anims, and the radio still flies the drone. Removed: the
   PlayIdleAnimations redirect (0x6887E2), the stand-still check, and release's walk-off case. The pose plays in
   the drone's views only (radio in use, F8 pose on); libfpv's INTEGRATION.md, header and overlay hint say so.
+- 2026-11-04: user report: cops never shot the drone down, they stood turned ~90 deg from it, shots went off
+  into the sky; the player's own shots from the F view never hit. Findings (logged angles + a DVR frame):
+  * DoBulletImpact (0x73B550) runs for every instant-hit bullet, also with no victim (0x740F8B -> 0x7412C2).
+  * Peds aim and fire in Idle's CWorld::ProcessPedsAfterPreRender (0x53EA03): ProcessAfterPreRender ->
+    CTaskSimpleUseGun::SetPedPosition -> FireGun -> CWeapon::Fire with the target ped (task +0x1C) ->
+    FireInstantHit, aimed at GetBonePosition(spine1 = 3, false) (0x73FE57): the skin's bones, as last drawn.
+    That's between our ConstructRenderList swap-in (CJ home for drawing) and RenderEffects swap-out, so
+    every cop aimed his arm and his bullets at CJ's home spot while his body faced the drone. Fixed: CJ back
+    at the drone (UpdateRpHAnim too) around that call, home again after; his bones rebuilt at the drone after
+    RenderEffects for the world update. The stand-in now puts his spine (what peds aim at), not his head, at
+    the drone, measured with GetTransformedBonePosition.
+  * Bullet hits: a body ball (6 cm) sets the warhead off (detonate even_if_safe) or breaks all props; a prop
+    disc crossed breaks that prop (1.0). Shots stop at what they hit. Non-player shots that passed within
+    1.5 m of CJ's aim bone are turned onto the drone (helicopters: their owner is the vehicle).
+  * Found with temporary logs (since removed): ped shot angles vs drone/bone/CJ/home, and a line per cop a
+    second (task chain: 912 wander > 1103 police pursuit > 1101 arrest > 1000/1002 kill on foot (armed) > 1020
+    gun control, 1017 use gun; 907 seek). Kept: a line per shot within 2 m of the drone, fire/water as one
+    line per soak, and "props now" whenever a prop is 0.05 worse.

@@ -18,7 +18,7 @@ constexpr float kReplace = 2.0f;  // re-add him to the world sectors after this 
 constexpr float kHoldCar = 100.0f;  // drone this far from CJ's car: it's held where it is
 
 enum class Mode { Off, Body, Queries };  // Body: CJ himself at the drone; Queries: only FindPlayer*
-constexpr float kMaxHeadOffset = 1.5f;  // beyond this his bones aren't in place yet
+constexpr float kMaxHeadOffset = 1.5f;  // spine this far from his root: his bones aren't in place yet
 
 Mode g_mode = Mode::Off;
 sa::CVector g_home{};      // CJ's spot
@@ -130,15 +130,16 @@ void place(sa::CPed *cj) {
     // Every frame: the game makes the player visible again on its own (camera code).
     sa::entity_flags(cj) &= ~(sa::kEntityUsesCollision | sa::kEntityVisible);
     if (!cj->matrix) return;
-    // His head right at the drone: what peds look at (their look-at IK aims at
-    // the head bone) and close to what they aim at. FindPlayerCoors is the
-    // drone itself. The bones are where he was last placed, so head - pos is
-    // the pose's own offset.
+    // His spine right at the drone: what peds shoot at (CWeapon::FireInstantHit
+    // aims at it), so their bullets and tracers go at the drone, missing it by
+    // their own aim. (With his head there they all went half a metre under.)
+    // FindPlayerCoors is the drone itself. The transformed bone (his frames
+    // from his matrix), not the skin's: that one is where he was last drawn.
     sa::CVector at = g_drone;
     if (pilot_clump(cj)) {
-        sa::CVector head = sa::bone_position(cj, sa::kBoneHead), &pos = cj->matrix->pos;
-        sa::CVector off = {head.x - pos.x, head.y - pos.y, head.z - pos.z};
-        if (dist(head, pos) < kMaxHeadOffset) at = {g_drone.x - off.x, g_drone.y - off.y, g_drone.z - off.z};
+        sa::CVector spine = sa::bone_position(cj, sa::kBoneSpine1), &pos = cj->matrix->pos;
+        sa::CVector off = {spine.x - pos.x, spine.y - pos.y, spine.z - pos.z};
+        if (dist(spine, pos) < kMaxHeadOffset) at = {g_drone.x - off.x, g_drone.y - off.y, g_drone.z - off.z};
     }
     // New world sector maybe: Remove + Add. Not CPed::Teleport, which first
     // flushes his tasks: that knocked him out of the pilot's pose every 2 m.
@@ -309,6 +310,14 @@ void install_hooks() {
 }
 
 bool on() { return g_mode != Mode::Off; }
+
+bool aim_point(float out[3]) {
+    sa::CPed *cj = sa::FindPlayerPed();
+    if (g_mode != Mode::Body || !cj || !cj->matrix || !pilot_clump(cj)) return false;
+    sa::CVector p = sa::aim_position(cj);
+    out[0] = p.x, out[1] = p.y, out[2] = p.z;
+    return true;
+}
 
 void tick() { settle(); }
 

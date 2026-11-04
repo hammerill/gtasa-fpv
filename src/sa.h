@@ -373,6 +373,15 @@ inline CVector bone_position(CPed *p, int bone) {
     return out;
 }
 constexpr int kBoneHead = 5;  // ePedBones 5: the head (8 is the jaw)
+constexpr int kBoneSpine1 = 3;  // what peds aim their guns at (CWeapon::FireInstantHit)
+// Where a ped aims at another ped: CPed::GetBonePosition(out, spine1, false),
+// thiscall, as CWeapon::FireInstantHit asks it (0x73FE57).
+inline CVector aim_position(CPed *p) {
+    CVector out{};
+    reinterpret_cast<void(__attribute__((thiscall)) *)(CPed *, CVector &, int, bool)>(0x5E4280)(p, out, kBoneSpine1,
+                                                                                               false);
+    return out;
+}
 
 // CVehicle::m_nVehicleSubType (3 = heli, as the CHeli constructor sets it at
 // 0x6C41E9), CAutomobile::m_fHeliRotorSpeed (CHeli::ProcessControl's
