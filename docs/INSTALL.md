@@ -42,7 +42,8 @@ Start the game, load a save and press **F7**. CJ launches the drone.
 
 | Key | Action |
 |---|---|
-| F7 | Launch the drone / return to CJ |
+| F7 | Launch the drone / end the flight back at CJ / back to the drone after F |
+| F | Back to CJ, the drone left flying (in flight) |
 | F8 | Settings: radio setup, rates, OSD, camera |
 | C | Cycle cameras: FPV, chase, line of sight |
 | R | Respawn the drone, repaired |

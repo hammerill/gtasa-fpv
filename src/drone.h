@@ -5,7 +5,8 @@
 
 namespace drone {
 
-// Launches the drone from CJ, or returns to CJ. Game thread only.
+// F7: launches the drone from CJ, or ends the flight back at CJ; from the
+// pilot view (F), back to the drone left in the world. Game thread only.
 void toggle();
 
 // Once per frame after CGame::Process: keys, overlay, session state.
@@ -20,6 +21,13 @@ float camera(float game_fov);
 void observe_view_window(float tan_half_y);
 
 bool active();
+
+// A drone is up and the game shows its view (FPV, chase, LOS, a blast's).
+bool flying_view();
+
+// A drone is up and the view is back on CJ (the F key): the game's camera,
+// HUD and controls, the drone left in the world.
+bool pilot_view();
 
 // The world must show nothing of the game's HUD (in flight), or no game text
 // at all (the pilot's OSD disable switch is on).

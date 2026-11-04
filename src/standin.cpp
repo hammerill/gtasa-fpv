@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "fpvapi.h"
 #include "log.h"
 #include "patch.h"
 #include "pilot.h"
@@ -10,8 +11,9 @@
 namespace standin {
 namespace {
 
-constexpr float kStart = 20.0f;  // drone this far from CJ's spot: he stands in for it
-constexpr float kStop = 10.0f;   // back this close: he goes home
+// The drone this far from CJ's spot (the player's F8 > Fly > Pilot distances,
+// 20 m by default): he stands in for it; back within the return distance
+// (10 m): he goes home. With the stand-in off there, he stays at his spot.
 constexpr float kReplace = 2.0f;  // re-add him to the world sectors after this much travel
 constexpr float kHoldCar = 100.0f;  // drone this far from CJ's car: it's held where it is
 
@@ -320,14 +322,14 @@ void home(float out[3]) {
 
 void update(const float drone_pos[3]) {
     g_drone = {drone_pos[0], drone_pos[1], drone_pos[2]};
-    if (sa::CPed *cj = sa::FindPlayerPed())
-        if (!sa::FindPlayerVehicle()) pilot::hold(cj);
+    fpv_pilot_config pc = fpvapi::pilot_config();
     if (g_mode == Mode::Off) {
         sa::CPed *cj = sa::FindPlayerPed();
-        if (cj && dist(cj->position(), g_drone) > kStart) begin();
+        if (cj && (pc.features & FPV_PILOT_STAND_IN) && dist(cj->position(), g_drone) > pc.stand_in_distance) begin();
         return;
     }
-    if (dist(g_home, g_drone) < kStop) {
+    // Turned off in the overlay mid-flight, or the drone came back: CJ goes home.
+    if (!(pc.features & FPV_PILOT_STAND_IN) || dist(g_home, g_drone) < pc.stand_in_return_distance) {
         end(true);
         return;
     }

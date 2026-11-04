@@ -1,4 +1,5 @@
-// CJ at his piloting spot: while the drone flies he stands still in a
+// CJ at his piloting spot: while the drone flies (the radio in use, standing
+// still, and the player's F8 > Fly > Pilot pose on) he stands in a
 // pilot's pose (otb.ifp's betting-slip anim: both hands in front; his head and face kept from the idle)
 // holding a radio transmitter, a small procedural model drawn in his hands.
 // While he stands in for the drone (standin.cpp) his real position is at the
@@ -15,8 +16,10 @@ namespace pilot {
 // Render-pass hooks (Idle: ConstructRenderList, RenderEffects). Once, game thread.
 void install_hooks();
 
-// Every drone step while CJ flies the drone on foot: the pose (and radio).
-void hold(sa::CPed *cj);
+// Every drone step while CJ flies the drone on foot. pose: the pilot's pose
+// (and radio) now, else the game's own anims (released from the pose). His
+// seat while he stands in from a vehicle is drawn either way.
+void hold(sa::CPed *cj, bool pose);
 
 // CJ's seat while he stands in from a vehicle: he is out of it (at the
 // drone), and drawn sitting there in the anim he had, instead of at a spot.

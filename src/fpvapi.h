@@ -31,12 +31,20 @@ namespace fpvapi {
 // which then keeps its data in the mod's fpv-data folder.
 #define FPV_SHARED_FUNCTIONS(X) X(fpv_shared_data_dir)
 
+// The pilot, the views and the game's own prop damage (2026-11); null with an
+// older libfpv.dll: then the stand-in and the pose are always on (20 m / 10 m),
+// the sound is onboard in every view and only libfpv's own hits break props.
+#define FPV_PILOT_FUNCTIONS(X)                                                                   \
+    X(fpv_set_view) X(fpv_audio_set_listener) X(fpv_drone_set_pilot_position)                    \
+    X(fpv_pilot_set_support) X(fpv_pilot_get_config) X(fpv_drone_damage_props)
+
 struct Api {
 #define FPV_FN(name) decltype(&::name) name = nullptr;
     FPV_FUNCTIONS(FPV_FN)
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)
     FPV_WIND_FUNCTIONS(FPV_FN)
     FPV_SHARED_FUNCTIONS(FPV_FN)
+    FPV_PILOT_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 };
 
@@ -48,5 +56,15 @@ bool loaded();
 
 // The loaded libfpv.dll carries a warhead (a kamikaze build).
 bool kamikaze();
+
+// What the player chose for CJ in F8 > Fly > Pilot (fpv_pilot_features and the
+// stand-in distances, metres). Both features on, 20 m / 10 m, with an older libfpv.
+fpv_pilot_config pilot_config();
+
+// fpv_set_view, fpv_drone_set_pilot_position and fpv_drone_damage_props when the
+// loaded libfpv has them.
+void set_view(fpv_view view);
+void set_pilot_position(fpv_drone *drone, const float feet[3]);
+void damage_props(fpv_drone *drone, int motor, float amount);
 
 }  // namespace fpvapi

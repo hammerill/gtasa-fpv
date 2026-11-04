@@ -356,3 +356,49 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
     release or when the drone comes back near, is put down with PlaceOnRoadProperly, then pinned in that pose
     (speeds zeroed) for 500 ms of game time by standin::tick (every frame, from core.cpp) while its wheels find
     the ground. Logged as "standin: CJ's car set down at ...". The debug tracing is gone.
+- 2026-11-03: adapted to libfpv 52be06c (the pilot API, views, damage). Not flown yet; the user tests.
+  - F in flight: the pilot view. CJ is the player's again (the game's camera, HUD and controls; the stand-in
+    ends, CJ home), the drone stays in the world and keeps ticking, drawn from the game's camera. libfpv hears
+    it from CJ: `fpv_set_view(FPV_VIEW_PILOT)`, the game camera as `fpv_audio_set_listener` every frame,
+    `fpv_drone_set_pilot_position` follows CJ. The keyboard's flight keys (W/A/S/D, arrows, Enter, T, B, K, X)
+    go to CJ, not libfpv, while the overlay is closed. F7 goes back to the drone (a kamikaze blast's view still
+    on shows as lost signal); C does nothing there (crouch). Refused while watching a replay or a frozen world.
+  - The pilot position is CJ's feet now (his position minus 1 m), so the LOS camera and the ear are 1.6 m above
+    the ground instead of 2.6 m.
+  - `fpv_pilot_set_support(STAND_IN | POSE, 20, 10)` after init; standin.cpp reads the distances and the switch
+    from `fpv_pilot_get_config`. The pose plays while `FPV_DRONE_RADIO_ACTIVE` and CJ stands still on foot
+    (always with an older libfpv), and fades back to his idle otherwise.
+  - damage.cpp, `fpv_drone_damage_props` per prop: under water (CWaterLevel::GetWaterLevel 0x6EB690) and in
+    fire (gFireManager 0xB71F80, 60 CFire of 0x28; 53 references to it in the exe) 0.5/s; a fresh explosion
+    within its radius 1 on all four; a turning heli rotor disc 1 on all four; a bullet passing within 7.4 cm of
+    a prop 0.75 (detour of CWeapon::DoBulletImpact 0x73B550, prologue `6A FF 68 50 8E 84 00` read from the exe).
+    Bullets that hit nothing behind the drone don't reach DoBulletImpact and do nothing; melee is not covered.
+- 2026-11-03 (later): the user's test of the above, and fixes. Built and deployed; not flown yet (the user tests).
+  - **Pose broken by CJ's idle moves** in the F view: CTaskSimplePlayerOnFoot's PlayIdleAnimations (0x6872C0,
+    thiscall(task, CPlayerPed*), `ret 4`; its only call is 0x6887E2) plays the PLAYIDLES block (anims
+    0x105-0x108: shoulder roll, stretches, watch) after 10 s without pad input, blending the pose out. The call
+    is redirected and skipped while CJ is posed on foot.
+  - **Respawn at the pilot**: R and the kamikaze ending's "respawn" now put the drone in front of CJ where he is
+    (after the stand-in brings him home), as at a launch (place_spawn, shared with start). A watching flight
+    still respawns at its launch point.
+  - **The game's sounds heard from the pilot** (libfpv `FPV_DRONE_HEARD_FROM_PILOT`, i.e. "Hear the drone
+    from: The pilot", or Auto in LOS): ear.cpp. SA positions every sound relative to TheCamera:
+    CAEAudioEnvironment::GetPositionRelativeToCamera (0x4D80B0, cdecl(out, pos); the CPlaceable overload at
+    0x4D8340 jumps into it) builds a CMatrix from m_mCameraMatrix (0xB6F99C) and TheCamera.m_matrix's position
+    (0xB6F03C, fallback 0xB6F02C), and the vehicle/ped/weapon/weather entities check distances to the camera
+    themselves. Vehicle audio is serviced from each vehicle's ProcessControl (CAEVehicleAudioEntity::Service
+    0x502280, called from 0x6B18F1, 0x6B9298, 0x6F1793, 0x6F86B6), not from CAudioEngine::Service (Idle
+    0x53E98B, after CGame::Process), so swapping the camera around the audio service would not do. Instead,
+    while on, the 85 operands in 0x4D0000-0x508000 that are TheCamera, its matrix pointer, placement position or
+    camera matrix (found with objdump; each checked before writing, all or nothing) point at a fake camera at
+    `frame.los_camera` (the pilot's head facing the drone). Left alone: 0x4D7E44 (Doppler reads a flag). Off
+    in the pilot view (the camera is on CJ) and on unload.
+  - **Stand-in vs. this** (asked to research): not a technical conflict. The relocation works with the stand-in
+    on (CJ at the drone only moves GetPositionRelativeToCamera's ear up to 0.5 m towards him). What changes is
+    what there is to hear: with the stand-in, population and traffic follow FindPlayer* (the drone), so once
+    the drone is far the pilot's surroundings empty out and go quiet. Left to the player (turn the stand-in
+    off for a living world around the pilot), noted in libfpv's INTEGRATION.md.
+  - **Wobbly drone sound** (LOS, 20-50 m): libfpv's synth followed the travel time's per-frame staircase within
+    each audio block, a pitch swing of 15 % at 25 fps (measured by libfpv's new fpv_synth_tests). Fixed in
+    libfpv: three 40 ms one-pole stages per sample (under 0.3 %), and the ground reflection low-passed at
+    1.5 kHz (it flanged the whole sound).

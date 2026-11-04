@@ -14,6 +14,8 @@ Api fpv;
 
 namespace {
 
+constexpr float kStandInDistance = 20.0f, kStandInReturnDistance = 10.0f;  // metres, the game's defaults
+
 bool g_loaded = false;
 bool g_failed = false;
 
@@ -69,6 +71,29 @@ std::string pick_data_dir() {
 
 bool loaded() { return g_loaded; }
 
+fpv_pilot_config pilot_config() {
+    fpv_pilot_config pc{};
+    pc.struct_size = sizeof pc;
+    if (!g_loaded || !fpv.fpv_pilot_get_config || fpv.fpv_pilot_get_config(&pc) != FPV_OK) {
+        pc.features = FPV_PILOT_STAND_IN | FPV_PILOT_POSE;
+        pc.stand_in_distance = kStandInDistance;
+        pc.stand_in_return_distance = kStandInReturnDistance;
+    }
+    return pc;
+}
+
+void set_view(fpv_view view) {
+    if (g_loaded && fpv.fpv_set_view) fpv.fpv_set_view(view);
+}
+
+void set_pilot_position(fpv_drone *drone, const float feet[3]) {
+    if (g_loaded && drone && fpv.fpv_drone_set_pilot_position) fpv.fpv_drone_set_pilot_position(drone, feet);
+}
+
+void damage_props(fpv_drone *drone, int motor, float amount) {
+    if (g_loaded && drone && fpv.fpv_drone_damage_props) fpv.fpv_drone_damage_props(drone, motor, amount);
+}
+
 bool kamikaze() {
     return g_loaded && fpv.fpv_kamikaze_poll_detonation && fpv.fpv_kamikaze_get_state && fpv.fpv_kamikaze_set_installed &&
            fpv.fpv_kamikaze_get_config && fpv.fpv_kamikaze_detonate;
@@ -100,6 +125,7 @@ bool load() {
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)
     FPV_WIND_FUNCTIONS(FPV_FN)
     FPV_SHARED_FUNCTIONS(FPV_FN)
+    FPV_PILOT_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 
     std::string data_dir = pick_data_dir();
@@ -120,11 +146,15 @@ bool load() {
         fpvlog::write("fpv_global_init: %s (%s)", fpv.fpv_result_string(r), fpv.fpv_last_error());
         return false;
     }
+    // CJ: carried along with a far drone (standin.cpp) and posed with a radio
+    // (pilot.cpp), at the distances the stand-in always had.
+    if (fpv.fpv_pilot_set_support)
+        fpv.fpv_pilot_set_support(FPV_PILOT_STAND_IN | FPV_PILOT_POSE, kStandInDistance, kStandInReturnDistance);
     g_failed = false;
     g_loaded = true;
-    fpvlog::write("libfpv %s initialised (%s, %s), data in %s", fpv.fpv_version_string(),
+    fpvlog::write("libfpv %s initialised (%s, %s, %s), data in %s", fpv.fpv_version_string(),
                   kamikaze() ? "kamikaze build" : "no warhead", fpv.fpv_wind_set ? "wind" : "no wind (older libfpv)",
-                  data_dir.c_str());
+                  fpv.fpv_pilot_set_support ? "pilot API" : "no pilot API (older libfpv)", data_dir.c_str());
     return true;
 }
 

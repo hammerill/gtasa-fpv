@@ -7,6 +7,8 @@
 #include <d3d9.h>
 
 #include "autotest.h"
+#include "damage.h"
+#include "ear.h"
 #include "drone.h"
 #include "fpvapi.h"
 #include "log.h"
@@ -97,9 +99,10 @@ const uint8_t kReleaseVideoMemoryPrologue[] = {0x53, 0x83, 0xC9, 0xFF, 0x33, 0xD
 
 // CCamera::ImproveNearClip -> hide the peds near the game's camera. That
 // camera still follows CJ, who stands in at the drone: peds right in front
-// of the lens vanished. The FPV camera has its own near plane.
+// of the lens vanished. The FPV camera has its own near plane. In the pilot
+// view (F) it is the game's camera on CJ again, as usual.
 bool __cdecl hide_peds_hook(void *a, void *b, void *c) {
-    if (drone::active()) return false;
+    if (drone::flying_view()) return false;
     return reinterpret_cast<bool(__cdecl *)(void *, void *, void *)>(g.hide_peds)(a, b, c);
 }
 
@@ -122,6 +125,7 @@ void install_hooks() {
     g.release_video_memory = patch::detour(0x7F7F70, kReleaseVideoMemoryPrologue, sizeof kReleaseVideoMemoryPrologue,
                                            reinterpret_cast<void *>(&release_video_memory_hook));
     standin::install_hooks();
+    damage::install_hooks();
     fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d, text %d %d %d, mouse %d, pads %d, hide peds %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
                   g.idle_end_update != 0, g.frontend_end_update != 0, g.hud != 0, g.radio_name != 0,
                   g.pickup_text != 0, g.messages_2d != 0, g.hud_after_fade != 0, g.messages_after_fade != 0,
@@ -169,6 +173,7 @@ extern "C" __declspec(dllexport) void gtasa_fpv_core_menu_tick() { ensure_hooks(
 // Called before the loader unloads this core: leave nothing pointing into it.
 extern "C" __declspec(dllexport) void gtasa_fpv_core_unload() {
     drone::shutdown();
+    ear::clear();  // the audio code reads our fake camera while it is on
     autotest::abort();
     render::release();
     patch::restore_all();

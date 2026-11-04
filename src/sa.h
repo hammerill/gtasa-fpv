@@ -423,4 +423,34 @@ inline const CExplosionSlot *explosions() { return reinterpret_cast<const CExplo
 constexpr int kExplosionCount = 16;
 constexpr int kExplosionMolotov = 1;
 
+// CFireManager gFireManager (0xB71F80, 53 references in the exe): 60 CFire of
+// 0x28 bytes first. CFire: flags (bit 0 active), script index, position, the
+// entity it burns (its position follows it), the creator, burn time, strength.
+struct CFire {
+    uint8_t flags;
+    uint8_t pad0;
+    int16_t script_index;
+    CVector pos;
+    CEntity *target;
+    CEntity *creator;
+    uint32_t burn_until;
+    float strength;
+    uint8_t pad1[0x28 - 0x20];
+};
+static_assert(sizeof(CFire) == 0x28, "CFire");
+inline const CFire *fires() { return reinterpret_cast<const CFire *>(0xB71F80); }
+constexpr int kFireCount = 60;
+constexpr uint8_t kFireActive = 0x1;
+
+// CWaterLevel::GetWaterLevel(x, y, z, &level, touching_water, normals): false where there is no water.
+inline bool GetWaterLevel(float x, float y, float z, float *level, bool touching, CVector *normals) {
+    return reinterpret_cast<bool(__cdecl *)(float, float, float, float *, bool, CVector *)>(0x6EB690)(
+        x, y, z, level, touching, normals);
+}
+
+// CWeapon::DoBulletImpact(owner, victim, start, end, colpoint, int), thiscall, ret 0x14:
+// push -1; push 0x848E50 (its SEH frame), absolute, so they move to a trampoline as they are.
+constexpr uintptr_t kDoBulletImpact = 0x73B550;
+constexpr uint8_t kDoBulletImpactPrologue[] = {0x6A, 0xFF, 0x68, 0x50, 0x8E, 0x84, 0x00};
+
 }  // namespace sa

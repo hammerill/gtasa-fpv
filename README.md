@@ -27,17 +27,31 @@ they do on a real quad.
   it's calm in the lee of buildings and indoors. Helicopters blow the drone
   down and away, and explosions shove it. Your quad has to hold against it
   like a real one. Turn it off or scale it in F8 > Fly > Wind.
+- **Back to CJ, the drone left flying.** F puts the view back on CJ: walk,
+  drive, keep the HUD, while the drone stays where it is. The radio still
+  flies it, so you can fly line of sight from CJ's own camera. F7 goes back
+  to the drone instead of launching a new one.
 - **The world treats the drone as CJ.** Once the drone is 20 m from CJ, he
   stands in for it: hidden, frozen and untouchable, right where the quad is.
   Peds, gangs and the police react to the drone as they would to CJ (with a
   wanted level, the cops come for the drone and shoot at it), and the city
   streams in, with traffic and pedestrians, wherever you fly. Back within
   10 m of his spot, he is himself again. In a vehicle he stays put; only
-  streaming and traffic follow the drone.
+  streaming and traffic follow the drone. Turn it off or change the
+  distances in F8 > Fly > Pilot.
 - **The pilot stays visible.** While you fly on foot, CJ stands at his spot
-  in a pilot's pose with a radio transmitter in his hands, and you still see
-  him there when you look back from the drone, however far it is.
-- **Motor sound** from libfpv's synthesizer.
+  in a pilot's pose with a radio transmitter in his hands (while the radio is
+  in use; it can be turned off in F8 > Fly > Pilot), and you still see him
+  there when you look back from the drone, however far it is.
+- **Props break like real ones**: in water, in fire (burning cars and
+  molotov flames too), in an explosion, in a helicopter's rotor, or with a
+  bullet through them. Turn damage off in F8 > Drone.
+- **Motor and beeper sound** from libfpv's synthesizer. In the line of sight
+  and CJ views it's heard from CJ: quieter far away and behind walls, with
+  Doppler and echoes. Set F8 > Camera & sound > Hear the drone from to "The
+  pilot" and the whole game is heard from CJ in every view, like a real pilot
+  flying something far away (turn the stand-in off for a living world around
+  him: with it, the city follows the drone).
 - **Clean view**: the HUD, radar and radio station name are hidden while you
   fly. Put Betaflight's OSD disable on a switch to hide the OSD, help boxes
   and subtitles too, for recording.
@@ -63,10 +77,11 @@ they do on a real quad.
 
 | Key | Action |
 |---|---|
-| F7 | Launch the drone / return to CJ |
+| F7 | Launch the drone / end the flight back at CJ / back to the drone after F |
+| F | Back to CJ, the drone left flying (in flight) |
 | F8 | Settings overlay (radio setup, rates, OSD, camera, fisheye strength) |
 | C | Cycle cameras: FPV, chase, line of sight |
-| R | Respawn the drone at its launch point, repaired |
+| R | Respawn the drone in front of CJ, repaired |
 | Y | Move CJ here (also a button in F8 > Fly) |
 
 Without a radio, the keyboard works as a fallback. Enter arms, W/S is

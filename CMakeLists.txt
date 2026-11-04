@@ -25,6 +25,8 @@ add_library(gtasa_fpv_core SHARED
   src/core.cpp
   src/audio.cpp
   src/autotest.cpp
+  src/damage.cpp
+  src/ear.cpp
   src/drone.cpp
   src/effects.cpp
   src/fpvapi.cpp
