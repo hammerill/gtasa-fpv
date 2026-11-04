@@ -28,8 +28,9 @@ they do on a real quad.
   down and away, and explosions shove it. Your quad has to hold against it
   like a real one. Turn it off or scale it in F8 > Fly > Wind.
 - **Back to CJ, the drone left flying.** F puts the view back on CJ: walk,
-  drive, keep the HUD, while the drone stays where it is. The radio still
-  flies it, so you can fly line of sight from CJ's own camera. F7 goes back
+  drive, keep the HUD, while the drone stays where it is. CJ is all yours
+  again, as if there were no drone, but the radio still flies it, so you can
+  fly line of sight from CJ's own camera. F7 goes back
   to the drone instead of launching a new one.
 - **The world treats the drone as CJ.** Once the drone is 20 m from CJ, he
   stands in for it: hidden, frozen and untouchable, right where the quad is.
@@ -39,7 +40,7 @@ they do on a real quad.
   10 m of his spot, he is himself again. In a vehicle he stays put; only
   streaming and traffic follow the drone. Turn it off or change the
   distances in F8 > Fly > Pilot.
-- **The pilot stays visible.** While you fly on foot, CJ stands at his spot
+- **The pilot stays visible.** While you fly on foot from the drone, CJ stands at his spot
   in a pilot's pose with a radio transmitter in his hands (while the radio is
   in use; it can be turned off in F8 > Fly > Pilot), and you still see him
   there when you look back from the drone, however far it is.
@@ -81,7 +82,7 @@ they do on a real quad.
 | F | Back to CJ, the drone left flying (in flight) |
 | F8 | Settings overlay (radio setup, rates, OSD, camera, fisheye strength) |
 | C | Cycle cameras: FPV, chase, line of sight |
-| R | Respawn the drone in front of CJ, repaired |
+| R | Respawn the drone at its launch point (in front of CJ after F), repaired |
 | Y | Move CJ here (also a button in F8 > Fly) |
 
 Without a radio, the keyboard works as a fallback. Enter arms, W/S is

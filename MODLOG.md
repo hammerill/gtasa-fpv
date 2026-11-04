@@ -402,3 +402,16 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
     each audio block, a pitch swing of 15 % at 25 fps (measured by libfpv's new fpv_synth_tests). Fixed in
     libfpv: three 40 ms one-pole stages per sample (under 0.3 %), and the ground reflection low-passed at
     1.5 kHz (it flanged the whole sound).
+- 2026-11-04: user report: after a kamikaze blast the respawn put the drone back near the blast, at "CJ" who
+  stands in there. Log: CJ stood in from his car; standin::end warped him back behind the wheel, but place_spawn
+  read cj->position(), still at the drone (a ped in a car only follows it on the next frame). In a vehicle the
+  spawn is now measured from the car's matrix. And the respawn in front of CJ only happens once the pilot view
+  (F) was used this flight; otherwise R and the ending's respawn go back to the launch point, as before.
+- 2026-11-04: user report: F into the pilot view also made CJ get into a car nearby. to_pilot released CJ's
+  controls in the same frame, so the game saw F (its enter-vehicle key) go down. CJ now stays held until F is
+  released; by then the game's old and new pad state agree, so there is no press for it to act on.
+- 2026-11-04: the pilot pose is gone from the F view (user's call). Posing CJ again whenever he stood still
+  there fought the game (its idle moves broke the pose, which needed PlayIdleAnimations skipped). Now CJ is the
+  player's in the pilot view, with the game's own anims, and the radio still flies the drone. Removed: the
+  PlayIdleAnimations redirect (0x6887E2), the stand-still check, and release's walk-off case. The pose plays in
+  the drone's views only (radio in use, F8 pose on); libfpv's INTEGRATION.md, header and overlay hint say so.

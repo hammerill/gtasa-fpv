@@ -1,5 +1,5 @@
-// CJ at his piloting spot: while the drone flies (the radio in use, standing
-// still, and the player's F8 > Fly > Pilot pose on) he stands in a
+// CJ at his piloting spot: while the drone flies from its views (the radio in
+// use, and the player's F8 > Fly > Pilot pose on; not in the pilot view) he stands in a
 // pilot's pose (otb.ifp's betting-slip anim: both hands in front; his head and face kept from the idle)
 // holding a radio transmitter, a small procedural model drawn in his hands.
 // While he stands in for the drone (standin.cpp) his real position is at the

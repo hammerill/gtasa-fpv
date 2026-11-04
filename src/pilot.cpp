@@ -17,10 +17,6 @@ namespace {
 // Idle (0x53E920): the render list is built, then PreRender, shadows, RenderScene, RenderEffects.
 constexpr sa::CallSite kIdleConstructRenderList = {0x53E9F9, 0x5556E0};  // CRenderer::ConstructRenderList()
 constexpr sa::CallSite kIdleRenderEffects = {0x53EAD3, 0x53E170};        // RenderEffects()
-// CTaskSimplePlayerOnFoot::ProcessPed -> PlayIdleAnimations(CPlayerPed*), thiscall
-// (0x6872C0: after 10 s without input, the PLAYIDLES block's shoulder roll,
-// stretches and watch check; they blend every other full-body anim out).
-constexpr sa::CallSite kPlayIdleAnimations = {0x6887E2, 0x6872C0};
 
 // The pose: otb.ifp (anim.img), a punter at the off-track betting shop
 // reading his slip: standing, head down, both hands in front at the waist,
@@ -91,7 +87,7 @@ constexpr int kBoneNeck = 5, kBoneHead = 8, kBoneRightHand = 24, kBoneRightFinge
 constexpr int kKeptBones[] = {4, 5, 6, 7, 8, 201, 301, 302};
 
 struct Original {
-    uintptr_t construct_render_list, render_effects, play_idles;
+    uintptr_t construct_render_list, render_effects;
 };
 Original g;
 
@@ -165,10 +161,7 @@ void release() {
     free_bones(cj && cj == sa::FindPlayerPed() ? rw_object(cj) : nullptr);
     if (!cj || cj != sa::FindPlayerPed() || !rw_object(cj)) return;
     if (sa::FindPlayerVehicle()) return;  // back in his car: its own anims
-    // The pose fades out and is deleted. Walking off (the pilot view), his
-    // move task blends the walk in on its own.
-    const sa::CVector &v = sa::move_speed(cj);
-    if (v.x * v.x + v.y * v.y < 0.01f * 0.01f) BlendAnimation(rw_object(cj), motion_group(cj), kAnimIdle, 4.0f);
+    BlendAnimation(rw_object(cj), motion_group(cj), kAnimIdle, 4.0f);  // the pose fades out and is deleted
     fpvlog::write("pilot: pose released");
 }
 
@@ -406,12 +399,6 @@ void __cdecl render_effects_hook() {
     swap_out();
 }
 
-// Posed (on foot, the pilot view or his own spot), CJ keeps the radio: no idle moves.
-void __attribute__((thiscall)) play_idles_hook(void *task, sa::CPed *ped) {
-    if (g_posed && ped == g_posed && !g_seated) return;
-    reinterpret_cast<void(__attribute__((thiscall)) *)(void *, sa::CPed *)>(g.play_idles)(task, ped);
-}
-
 }  // namespace
 
 void install_hooks() {
@@ -419,10 +406,7 @@ void install_hooks() {
                                                    reinterpret_cast<void *>(&construct_render_list_hook));
     g.render_effects = patch::redirect_call(kIdleRenderEffects.site, kIdleRenderEffects.fn,
                                             reinterpret_cast<void *>(&render_effects_hook));
-    g.play_idles = patch::redirect_call(kPlayIdleAnimations.site, kPlayIdleAnimations.fn,
-                                        reinterpret_cast<void *>(&play_idles_hook));
-    fpvlog::write("pilot: hooks render list %d, effects %d, idles %d", g.construct_render_list != 0,
-                  g.render_effects != 0, g.play_idles != 0);
+    fpvlog::write("pilot: hooks render list %d, effects %d", g.construct_render_list != 0, g.render_effects != 0);
 }
 
 void hold(sa::CPed *cj, bool pose) {

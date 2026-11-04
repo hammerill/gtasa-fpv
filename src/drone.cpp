@@ -29,7 +29,6 @@ constexpr float kWidestAspect = 2.4f;  // frustum probes cover up to 21:9
 constexpr float kCutsceneDistance = 14.0f;  // camera back from the blast, horizontally
 constexpr float kCutsceneHeight = 5.0f;     // and up
 constexpr float kPedFeet = 1.0f;            // a ped's position is this far above his feet
-constexpr float kStillSpeed = 0.01f;        // m per 1/50 s: CJ stands still below this (the pose)
 
 using fpvapi::fpv;
 
@@ -57,6 +56,10 @@ View g_view = View::Fpv;  // the flight view, also the one F7 goes back to from 
 // F: back to CJ (the game's camera and controls), the drone left in the world,
 // still flown by the radio. F7 goes back to it.
 bool g_pilot_view = false;
+bool g_pilot_moved = false;  // the pilot view was used this flight: CJ may not be at the launch point
+// The F that opened the pilot view is still down: CJ stays held until it is
+// released, or the game takes the press as its own F (enter a vehicle nearby).
+bool g_pilot_key_down = false;
 bool g_stepped = false;  // camera() ran this frame (inside CCamera::Process)
 float g_spawn_pos[3];
 float g_spawn_rot[4];
@@ -319,17 +322,16 @@ void update_ear() {
     ear::set(c.position, c.forward, c.up);
 }
 
-// The pilot's pose while the radio is in use and CJ stands still on foot (the
-// player can turn it off in F8 > Fly > Pilot); his seat while he stands in
-// from a vehicle either way.
+// The pilot's pose while the drone is flown from its views and the radio is in
+// use (the player can turn it off in F8 > Fly > Pilot); his seat while he
+// stands in from a vehicle either way. Never in the pilot view: CJ is the
+// player's there, with the game's own anims, as if there were no drone.
 void update_pose(const fpv_frame &frame) {
     sa::CPed *cj = sa::FindPlayerPed();
     if (!cj || sa::FindPlayerVehicle()) return;
-    const sa::CVector &v = sa::move_speed(cj);
-    bool still = !g_pilot_view || v.x * v.x + v.y * v.y + v.z * v.z < kStillSpeed * kStillSpeed;
     // An older libfpv has no FPV_DRONE_RADIO_ACTIVE: posed all flight long, as before.
     bool radio = !fpv.fpv_pilot_get_config || (frame.flags & FPV_DRONE_RADIO_ACTIVE);
-    pilot::hold(cj, still && radio && (fpvapi::pilot_config().features & FPV_PILOT_POSE));
+    pilot::hold(cj, !g_pilot_view && radio && (fpvapi::pilot_config().features & FPV_PILOT_POSE));
 }
 
 // Where a drone starts (a launch, or a respawn: R and the kamikaze ending's
@@ -340,7 +342,9 @@ void update_pose(const fpv_frame &frame) {
 // from. Returns whether it found the ground.
 bool place_spawn(Scene scene, sa::CPed *cj, sa::CVehicle *car, sa::CVector &pilot, float &heading) {
     const sa::CMatrix &m = scene != Scene::Live ? sa::camera_matrix() : car && car->matrix ? *car->matrix : *cj->matrix;
-    sa::CVector p = scene != Scene::Live ? m.pos : cj->position();
+    // In a vehicle, the car's own position: CJ's catches up with it only on
+    // the next frame after the stand-in warps him back in.
+    sa::CVector p = scene != Scene::Live || car ? m.pos : cj->position();
     float h = heading_of(m.forward);
     float ahead = car ? 4.0f : 2.0f;
     g_spawn_pos[0] = p.x - std::sin(h) * ahead;
@@ -412,6 +416,7 @@ void start() {
     g_shot.on = false;
     g_view = View(tuning().view % int(View::Count));
     g_pilot_view = false;
+    g_pilot_moved = false;
     fpvapi::set_view(libfpv_view());
     audio::start();
     if (!watching()) fpv.fpv_overlay_set_action(kMoveCjAction, "Move CJ here (Y)");
@@ -536,13 +541,14 @@ void clear_ending() {
     g_osd_no_signal = false;
 }
 
-// R, or the ending's "respawn": repaired, in front of CJ where he is now
-// (he may have walked or driven off in the pilot view); a watching flight's
-// at its launch point, as its pilot is the camera there.
+// R, or the ending's "respawn": repaired, at the launch point. After the
+// pilot view (F), where CJ may have walked or driven off, in front of him
+// at his spot instead (where he is seen: his real self comes home from the
+// drone first, if he stands in for it).
 void respawn_drone() {
     standin::end(true);  // CJ home first: the spawn's collision must be streamed in
     sa::CPed *cj = sa::FindPlayerPed();
-    if (!watching() && cj && cj->matrix) {
+    if (!watching() && g_pilot_moved && cj && cj->matrix) {
         sa::CVector p;
         float h;
         bool ground = place_spawn(Scene::Live, cj, sa::FindPlayerVehicle(), p, h);
@@ -755,10 +761,12 @@ void to_pilot() {
     }
     standin::end(true);
     g_pilot_view = true;
+    g_pilot_moved = true;
+    g_pilot_key_down = true;
     g_shot.on = false;
     g_osd_visible = false;
     audio::set_static(false);
-    hold_cj(false);
+    // CJ's controls come back once F is up (tick)
     sfx::play(sa::kSoundBack);
     fpvlog::write("pilot view: back to CJ, the drone left at %.2f %.2f %.2f%s", g_frame.position[0],
                   g_frame.position[1], g_frame.position[2], g_frame.flags & FPV_DRONE_ARMED ? " (armed)" : "");
@@ -902,7 +910,8 @@ void tick() {
     if (g_ending.on && move_cj && !watching()) fpvlog::write("kamikaze: ending cut short: Move CJ here");
     // Scripts may have cleared the pad's state (cutscenes, missions). In the
     // pilot view CJ is the player's, but not while he types in the overlay.
-    hold_cj(!g_pilot_view || fpv.fpv_overlay_wants_input());
+    if (g_pilot_key_down && !(GetAsyncKeyState('F') & 0x8000)) g_pilot_key_down = false;
+    hold_cj(!g_pilot_view || g_pilot_key_down || fpv.fpv_overlay_wants_input());
     if (g_pilot_view) update_listener();
     update_ear();
     static fpv_view reported_view = FPV_VIEW_FPV;
