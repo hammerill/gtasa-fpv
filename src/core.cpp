@@ -16,6 +16,7 @@
 #include "render.h"
 #include "sa.h"
 #include "standin.h"
+#include "video.h"
 
 namespace {
 
@@ -176,6 +177,7 @@ extern "C" __declspec(dllexport) void gtasa_fpv_core_unload() {
     ear::clear();  // the audio code reads our fake camera while it is on
     autotest::abort();
     render::release();
+    video::shutdown();  // the shader compile thread runs our code
     patch::restore_all();
     fpvlog::write("core unloaded");
 }

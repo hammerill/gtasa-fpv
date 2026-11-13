@@ -16,6 +16,7 @@
 #include "sa.h"
 #include "sfx.h"
 #include "standin.h"
+#include "video.h"
 #include "wind.h"
 #include "world.h"
 
@@ -211,10 +212,22 @@ float lens_edge(const fpv_camera &c, float aspect) {
     float zoom = c.distortion_zoom > 0 ? c.distortion_zoom : 1;
     return (1 + c.distortion_k1 * r2 + c.distortion_k2 * r2 * r2) / zoom;
 }
+// With the video feed's resolution effect, the goggles show the camera's own
+// picture (4:3 or 16:9, black bars) cut from the middle of the game's frame:
+// the lens works on that aspect, and a picture wider than the screen needs a
+// taller frame.
 float lens_fov(const fpv_camera &c) {
-    if ((c.distortion_k1 == 0 && c.distortion_k2 == 0) || c.aspect_hint <= 0) return c.fov_y_degrees;
-    float chosen = std::tan(c.fov_y_degrees * 0.5f / kRadToDeg) * lens_edge(c, c.aspect_hint);
-    float fov = 2 * std::atan(chosen / lens_edge(c, render::aspect())) * kRadToDeg;
+    float out = render::aspect(), taller = 1;
+    const fpv_video_feed &vf = g_frame.video_feed;
+    if (g_have_frame && (video::flags(g_frame) & FPV_VIDEO_FEED_RESOLUTION) && vf.picture_aspect > 0.1f &&
+        video::usable()) {
+        out = vf.picture_aspect;
+        if (out > render::aspect()) taller = out / render::aspect();
+    }
+    float t = std::tan(c.fov_y_degrees * 0.5f / kRadToDeg);
+    if ((c.distortion_k1 != 0 || c.distortion_k2 != 0) && c.aspect_hint > 0)
+        t *= lens_edge(c, c.aspect_hint) / lens_edge(c, out);
+    float fov = 2 * std::atan(t * taller) * kRadToDeg;
     return fov > 170 ? 170 : fov;
 }
 

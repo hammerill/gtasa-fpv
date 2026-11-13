@@ -13,6 +13,7 @@
 #include "log.h"
 #include "paths.h"
 #include "sa.h"
+#include "video.h"
 
 namespace render {
 namespace {
@@ -123,7 +124,8 @@ void setup_state(IDirect3DDevice9 *dev, float w, float h) {
     dev->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
 }
 
-void draw(IDirect3DDevice9 *dev, const fpv_draw_data &dd) {
+// sx, sy: target pixels per draw data unit (1 when drawn at its display_size).
+void draw(IDirect3DDevice9 *dev, const fpv_draw_data &dd, float sx = 1, float sy = 1) {
     for (uint32_t l = 0; l < dd.list_count; ++l) {
         const fpv_draw_list &list = dd.lists[l];
         g_vertices.resize(list.vertex_count);
@@ -131,12 +133,13 @@ void draw(IDirect3DDevice9 *dev, const fpv_draw_data &dd) {
             const fpv_draw_vertex &s = list.vertices[i];
             uint32_t c = s.color;  // ImGui ABGR -> D3D ARGB
             c = (c & 0xff00ff00u) | ((c & 0xffu) << 16) | ((c >> 16) & 0xffu);
-            g_vertices[i] = {s.pos[0] - 0.5f, s.pos[1] - 0.5f, 0.0f, 1.0f, c, s.uv[0], s.uv[1]};
+            g_vertices[i] = {s.pos[0] * sx - 0.5f, s.pos[1] * sy - 0.5f, 0.0f, 1.0f, c, s.uv[0], s.uv[1]};
         }
         for (uint32_t c = 0; c < list.command_count; ++c) {
             const fpv_draw_cmd &cmd = list.commands[c];
             if (!cmd.index_count || cmd.vertex_offset >= list.vertex_count) continue;
-            RECT clip = {LONG(cmd.clip_rect[0]), LONG(cmd.clip_rect[1]), LONG(cmd.clip_rect[2]), LONG(cmd.clip_rect[3])};
+            RECT clip = {LONG(cmd.clip_rect[0] * sx), LONG(cmd.clip_rect[1] * sy), LONG(cmd.clip_rect[2] * sx),
+                         LONG(cmd.clip_rect[3] * sy)};
             if (clip.right <= clip.left || clip.bottom <= clip.top) continue;
             dev->SetScissorRect(&clip);
             dev->SetTexture(0, texture(dev, cmd.texture_id));
@@ -151,8 +154,8 @@ void draw(IDirect3DDevice9 *dev, const fpv_draw_data &dd) {
 // pixel shader: each grid vertex at output position uv samples the copied
 // scene at c * (1 + k1 r2 + k2 r2^2) / zoom, with |c| = 1 at the corners.
 // The game drew the frame with the widened FOV from frame.camera.
-bool draw_lens(IDirect3DDevice9 *dev, IDirect3DSurface9 *backbuffer, const D3DSURFACE_DESC &desc,
-               const fpv_camera &cam) {
+// The finished frame, copied into g_scene.
+bool copy_scene(IDirect3DDevice9 *dev, IDirect3DSurface9 *backbuffer, const D3DSURFACE_DESC &desc) {
     if (!g_scene || g_scene_w != desc.Width || g_scene_h != desc.Height || g_scene_format != desc.Format) {
         if (g_scene) g_scene->Release();
         g_scene = nullptr;
@@ -165,8 +168,12 @@ bool draw_lens(IDirect3DDevice9 *dev, IDirect3DSurface9 *backbuffer, const D3DSU
     if (FAILED(g_scene->GetSurfaceLevel(0, &copy))) return false;
     HRESULT hr = dev->StretchRect(backbuffer, nullptr, copy, nullptr, D3DTEXF_NONE);
     copy->Release();
-    if (FAILED(hr)) return false;
+    return SUCCEEDED(hr);
+}
 
+bool draw_lens(IDirect3DDevice9 *dev, IDirect3DSurface9 *backbuffer, const D3DSURFACE_DESC &desc,
+               const fpv_camera &cam) {
+    if (!copy_scene(dev, backbuffer, desc)) return false;
     const float w = float(desc.Width), h = float(desc.Height), a = w / h;
     const float sx = a / (0.5f * std::sqrt(a * a + 1)), sy = 1 / (0.5f * std::sqrt(a * a + 1));
     const float k1 = cam.distortion_k1, k2 = cam.distortion_k2, zoom = cam.distortion_zoom > 0 ? cam.distortion_zoom : 1;
@@ -193,6 +200,14 @@ bool draw_lens(IDirect3DDevice9 *dev, IDirect3DSurface9 *backbuffer, const D3DSU
                                 g_grid_indices.data(), D3DFMT_INDEX16, g_grid.data(), sizeof(Vertex));
     dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
     return true;
+}
+
+// An OSD into the bound render target (video.cpp: the OSD chip's picture, or
+// over the goggles' picture).
+void draw_ui(IDirect3DDevice9 *dev, const fpv_draw_data &dd, float w, float h) {
+    setup_state(dev, w, h);
+    float dw = dd.display_size[0] > 0 ? dd.display_size[0] : w, dh = dd.display_size[1] > 0 ? dd.display_size[1] : h;
+    draw(dev, dd, w / dw, h / dh);
 }
 
 uint32_t noise() {
@@ -556,10 +571,15 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
     bool no_signal = false;
     bool fpv_view = in_game && drone::osd_frame(&snapshot, &no_signal);
     bool lens = fpv_view && !no_signal && (snapshot.camera.distortion_k1 != 0 || snapshot.camera.distortion_k2 != 0);
-    if (fpv_view && (drone::tuning().osd || no_signal))
-        osd = fpv.fpv_osd_draw_data(&snapshot, w, h, FPV_OSD_STYLE_ANALOG);
+    bool want_osd = fpv_view && (drone::tuning().osd || no_signal);
+    // The video feed (the player turned it on in F8 > Camera): the goggles
+    // draw the lens and the OSD too. A lost feed is its own snow while the
+    // noise is on; with it off, our static stands in.
+    uint32_t feed = fpv_view ? video::flags(snapshot) : 0;
+    bool goggles = feed && (!no_signal || (feed & FPV_VIDEO_FEED_NOISE)) && video::usable();
+    if (want_osd && !goggles) osd = fpv.fpv_osd_draw_data(&snapshot, w, h, FPV_OSD_STYLE_ANALOG);
     const fpv_draw_data *overlay = fpv.fpv_overlay_render(dt);
-    if (!lens && !no_signal && (!osd || !osd->list_count) && (!overlay || !overlay->list_count)) {
+    if (!goggles && !lens && !no_signal && (!osd || !osd->list_count) && (!overlay || !overlay->list_count)) {
         save_screenshot(dev, backbuffer, desc);
         backbuffer->Release();
         return;
@@ -580,11 +600,20 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
     SavedState saved;
     saved.save(dev);
     setup_state(dev, w, h);
-    if (lens && !draw_lens(dev, backbuffer, desc, snapshot.camera)) {
+    if (goggles && !(copy_scene(dev, backbuffer, desc) &&
+                     video::draw(dev, g_scene, desc.Width, desc.Height, desc.Width, desc.Height, snapshot, want_osd, &draw_ui))) {
+        static int reported = 0;
+        if (reported++ < 3) fpvlog::write("render: video feed pass failed: the plain view instead");
+        goggles = false;
+        setup_state(dev, w, h);
+        if (want_osd) osd = fpv.fpv_osd_draw_data(&snapshot, w, h, FPV_OSD_STYLE_ANALOG);
+    }
+    if (goggles) setup_state(dev, w, h);  // for the overlay
+    if (!goggles && lens && !draw_lens(dev, backbuffer, desc, snapshot.camera)) {
         static int reported = 0;
         if (reported++ < 3) fpvlog::write("render: fisheye pass failed (format %d)", int(desc.Format));
     }
-    if (no_signal && !draw_static(dev, w, h)) {
+    if (!goggles && no_signal && !draw_static(dev, w, h)) {
         static int reported = 0;
         if (reported++ < 3) fpvlog::write("render: static pass failed");
     }
@@ -598,6 +627,7 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
 float aspect() { return g_aspect; }
 
 void release() {
+    video::release();
     if (g_scene) g_scene->Release();
     g_scene = nullptr;
     g_scene_w = g_scene_h = 0;
