@@ -45,6 +45,8 @@ jobs:
           cmake --build libfpv/build/win32 -j"$(nproc)"
 
       - name: Build the mod
+        env:
+          GTASA_FPV_VERSION: build-${{ github.run_number }}  # the release tag below
         run: |
           cmake -S gtasa-fpv -B gtasa-fpv/build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/gtasa-fpv/cmake/mingw-w64-i686.cmake" \

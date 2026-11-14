@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 
+#include "build_info.h"
 #include "log.h"
 #include "paths.h"
 #include "video.h"
@@ -145,6 +146,10 @@ bool load() {
     // video.cpp draws the video feed (noise, the camera's resolution and
     // aspect) when Windows has the shader compiler: then F8 offers it.
     if (video::start()) cfg.flags |= FPV_INIT_VIDEO_FEED;
+    // F8 > About: the mod's build next to libfpv's, for bug reports.
+    cfg.host_name = "GTA San Andreas FPV";
+    cfg.host_build = GTASA_FPV_BUILD;
+    cfg.host_url = "https://github.com/hammerill/gtasa-fpv";
     fpv_result r = fpv.fpv_global_init(&cfg);
     if (r != FPV_OK && r != FPV_ERROR_ALREADY_INITIALIZED) {
         fpvlog::write("fpv_global_init: %s (%s)", fpv.fpv_result_string(r), fpv.fpv_last_error());

@@ -43,6 +43,14 @@ add_library(gtasa_fpv_core SHARED
   src/paths.cpp
 )
 set_target_properties(gtasa_fpv_core PROPERTIES PREFIX "" OUTPUT_NAME "GTASA.FPV.core")
+# The mod's version and commit for libfpv's F8 > About tab (src/fpvapi.cpp).
+set(GTASA_FPV_BUILD_INFO "${CMAKE_BINARY_DIR}/generated/build_info.h")
+add_custom_target(gtasa_fpv_build_info
+  COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${GTASA_FPV_BUILD_INFO} -P ${CMAKE_SOURCE_DIR}/cmake/build_info.cmake
+  BYPRODUCTS ${GTASA_FPV_BUILD_INFO}
+  COMMENT "Build info for the About tab")
+add_dependencies(gtasa_fpv_core gtasa_fpv_build_info)
+target_include_directories(gtasa_fpv_core PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(gtasa_fpv_core PRIVATE winmm d3d9)
 # The core appends to the log the loader started.
 target_compile_definitions(gtasa_fpv_core PRIVATE FPVLOG_APPEND)
