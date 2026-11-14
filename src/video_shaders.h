@@ -13,6 +13,7 @@ sampler2D scene : register(s0);
 sampler2D osd : register(s1);
 sampler2D lines : register(s2);
 sampler2D history : register(s3);
+sampler2D ui : register(s4);        // the game UI kept in flight, premultiplied
 float2 raster : register(c0);       // pixels of this target
 float noise : register(c1);
 float res : register(c2);
@@ -35,6 +36,7 @@ float2 digital : register(c18);
 float blocks : register(c19);
 float softness : register(c20);
 float lineRows : register(c21);     // rows of the lines texture
+float4 uiRect : register(c22);      // the picture in the UI's screen: x, y, width, height (0: no UI)
 
 static const float PI = 3.14159265;
 // Dave Hoskins' hash without sine: the same on every GPU
@@ -52,11 +54,22 @@ float2 sceneUv(float2 p) {
   if (s <= 1.0) d.x *= s; else d.y /= s;
   return d + 0.5;
 }
-float3 tap(float2 p) {
+float3 lensTap(float2 p) {
   float2 s = sceneUv(p);
   float3 c = S(scene, s).rgb;
   return (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) ? float3(0.0, 0.0, 0.0) : c;
 }
+// the kept game UI over the lens's picture, not through the lens, so the
+// signal treats it like the OSD
+float3 withUi(float3 c, float2 p) {
+  [branch] if (uiRect.z > 0.0) {
+    float4 u = S(ui, uiRect.xy + p * uiRect.zw);
+    c = c * (1.0 - u.a) + u.rgb;
+  }
+  return c;
+}
+// the camera's picture
+float3 tap(float2 p) { return withUi(lensTap(p), p); }
 // the OSD chip's 4:3 grid; over a picture of another aspect (resolution off) it stays 4:3
 float4 osdTap(float2 p) {
   if (osdIn < 0.5) return float4(0.0, 0.0, 0.0, 0.0);
@@ -173,7 +186,9 @@ float3 analog(float2 uv) {
 #if MODE == 2
 float3 boxTap(float2 p, float2 size) {
   float2 o = 0.25 * size;
-  return 0.25 * (tap(p + float2(-o.x, -o.y)) + tap(p + float2(o.x, -o.y)) + tap(p + float2(-o.x, o.y)) + tap(p + float2(o.x, o.y)));
+  // the UI once, at the middle: its four taps would overflow ps_3_0's 1024 slots
+  return withUi(0.25 * (lensTap(p + float2(-o.x, -o.y)) + lensTap(p + float2(o.x, -o.y)) +
+                        lensTap(p + float2(-o.x, o.y)) + lensTap(p + float2(o.x, o.y))), p);
 }
 float3 digitalPix(float2 uv) {
   float2 p = uv;

@@ -53,9 +53,13 @@ they do on a real quad.
   pilot" and the whole game is heard from CJ in every view, like a real pilot
   flying something far away (turn the stand-in off for a living world around
   him: with it, the city follows the drone).
-- **Clean view**: the HUD, radar and radio station name are hidden while you
-  fly. Put Betaflight's OSD disable on a switch to hide the OSD, help boxes
-  and subtitles too, for recording.
+- **Clean view**: none of the game's UI shows while you fly (HUD, radar,
+  radio station, district and vehicle names, help boxes, subtitles, mission
+  titles). The one exception is the collectibles' count ("Oysters 3 of
+  50"), so you know a pickup counted. It is part of the camera's picture:
+  the video noise covers it, the fisheye doesn't bend it. Put Betaflight's
+  OSD disable on a switch to hide the OSD and that count too, for
+  recording.
 - **Sound reactions** in the game's own sounds: a menu click when the drone
   launches or CJ moves to it, the back sound on recall, a tick on a camera
   switch, the error buzz when something can't be done, and a collision sound

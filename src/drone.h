@@ -29,8 +29,8 @@ bool flying_view();
 // HUD and controls, the drone left in the world.
 bool pilot_view();
 
-// The world must show nothing of the game's HUD (in flight), or no game text
-// at all (the pilot's OSD disable switch is on).
+// The world must show none of the game's UI (in flight), or not even the UI
+// kept in flight (the pilot's OSD disable switch is on).
 bool hide_hud();
 bool hide_text();
 

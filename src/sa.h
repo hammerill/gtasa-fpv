@@ -66,7 +66,8 @@ struct CallSite {
 constexpr CallSite kIdleGameProcess = {0x53E981, 0x53BEE0};   // CGame::Process()
 constexpr CallSite kIdleEndUpdate = {0x53EBF5, 0x7EE180};     // RwCameraEndUpdate(Scene.camera)
 constexpr CallSite kIdleRenderScene = {0x53EABF, 0x53DF40};   // RenderScene()
-constexpr CallSite kIdleHudAfterFade = {0x53EBA2, 0x58D490};  // CHud::DrawAfterFade()
+// CHud::DrawAfterFade(): district and vehicle names, stats box, mission title, odd job text.
+constexpr CallSite kIdleHudAfterFade = {0x53EBA2, 0x58D490};
 constexpr CallSite kIdleMessages = {0x53EBA9, 0x69EFC0};      // CMessages::Display(false)
 // RsMouseSetPos(&centre), every frame outside the pause menu (non-exclusive DirectInput mouse,
 // so the OS cursor is what gets pinned).
@@ -81,6 +82,9 @@ constexpr CallSite kRender2dPickupText = {0x53E298, 0x455000};  // CPickups::Ren
 constexpr CallSite kRender2dRadioName = {0x53E4FA, 0x507030};   // AudioEngine.DisplayRadioStationName(), thiscall
 constexpr CallSite kRender2dHud = {0x53E4FF, 0x58FAE0};         // CHud::Draw()
 constexpr CallSite kRender2dMessages = {0x53E515, 0x69EFC0};    // CMessages::Display(true)
+// CGarages::PrintMessages(): garage messages, and the collectibles' count
+// (oysters, horseshoes, tags, snapshots: CGarages::TriggerMessage).
+constexpr CallSite kRender2dGarageText = {0x53E50E, 0x44CC20};
 // CCamera::Process (0x52B730): CDraw::SetFOV(fov), right before
 // CalculateDerivedValues (frustum) and CopyCameraMatrixToRWCam.
 constexpr CallSite kCameraSetFov = {0x52C976, 0x6FF410};
@@ -227,6 +231,8 @@ inline void *RwCameraSetNearClipPlane(void *cam, float near_clip) {
     return reinterpret_cast<void *(__cdecl *)(void *, float)>(0x7EE1D0)(cam, near_clip);
 }
 inline IDirect3DDevice9 *GetD3DDevice() { return reinterpret_cast<IDirect3DDevice9 *(__cdecl *)()>(0x7F9D50)(); }
+// CFont::RenderFontBuffer (CFont::DrawFonts jumps here): draws the text CFont queued.
+inline void RenderFontBuffer() { reinterpret_cast<void(__cdecl *)()>(0x719840)(); }
 
 // CEntity flags at +0x1C: bit 0 bUsesCollision, bit 7 bIsVisible.
 inline uint32_t &entity_flags(CEntity *e) { return *reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(e) + 0x1C); }

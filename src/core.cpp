@@ -23,7 +23,7 @@ namespace {
 // What the redirected calls went to before (the game, or another mod).
 struct Original {
     uintptr_t set_fov, render_scene, idle_end_update, frontend_end_update, hud, radio_name, pickup_text, messages_2d,
-        hud_after_fade, messages_after_fade, mouse_set_pos, update_pads, hide_peds;
+        hud_after_fade, messages_after_fade, garage_text, mouse_set_pos, update_pads, hide_peds;
     void *release_video_memory;
 };
 Original g;
@@ -50,8 +50,10 @@ void *end_update(uintptr_t original, void *camera, bool in_game) {
 void *__cdecl idle_end_update_hook(void *camera) { return end_update(g.idle_end_update, camera, true); }
 void *__cdecl frontend_end_update_hook(void *camera) { return end_update(g.frontend_end_update, camera, false); }
 
-// The HUD, radar and radio station name would cover the FPV feed; with the
-// pilot's OSD disable switch on, help boxes, subtitles and other text go too.
+// No game UI over the flight (docs/INTEGRATION.md in libfpv, "No game UI in
+// FPV"): the HUD, radar, radio station name, pickup text, help boxes,
+// subtitles and the after-fade pass (district and vehicle names, stats,
+// mission titles) all go. The one exception is garage_text_hook below.
 void __cdecl hud_hook() {
     if (!drone::hide_hud()) reinterpret_cast<VoidFn>(g.hud)();
 }
@@ -62,13 +64,27 @@ void __cdecl pickup_text_hook() {
     if (!drone::hide_hud()) reinterpret_cast<VoidFn>(g.pickup_text)();
 }
 void __cdecl messages_2d_hook(bool flag) {
-    if (!drone::hide_text()) reinterpret_cast<void(__cdecl *)(bool)>(g.messages_2d)(flag);
+    if (!drone::hide_hud()) reinterpret_cast<void(__cdecl *)(bool)>(g.messages_2d)(flag);
 }
 void __cdecl hud_after_fade_hook() {
-    if (!drone::hide_text()) reinterpret_cast<VoidFn>(g.hud_after_fade)();
+    if (!drone::hide_hud()) reinterpret_cast<VoidFn>(g.hud_after_fade)();
 }
 void __cdecl messages_after_fade_hook(bool flag) {
-    if (!drone::hide_text()) reinterpret_cast<void(__cdecl *)(bool)>(g.messages_after_fade)(flag);
+    if (!drone::hide_hud()) reinterpret_cast<void(__cdecl *)(bool)>(g.messages_after_fade)(flag);
+}
+// The one game UI kept in flight: the collectible messages ("Oysters 3 of
+// 50"). In flight they are drawn into render's kept-UI layer, which goes
+// through the video feed under the OSD but not through the lens.
+void __cdecl garage_text_hook() {
+    if (drone::hide_text()) return;
+    if (!drone::flying_view()) return reinterpret_cast<VoidFn>(g.garage_text)();
+    IDirect3DDevice9 *dev = sa::GetD3DDevice();
+    if (!dev) return;
+    sa::RenderFontBuffer();  // the HUD's text queued so far stays on the back buffer
+    if (!render::begin_kept_ui(dev)) return;
+    reinterpret_cast<VoidFn>(g.garage_text)();
+    sa::RenderFontBuffer();
+    render::end_kept_ui(dev);
 }
 
 // Idle -> RsMouseSetPos(&centre): the game pins the cursor to the middle of
@@ -120,6 +136,7 @@ void install_hooks() {
     g.messages_2d = hook_call(sa::kRender2dMessages, reinterpret_cast<void *>(&messages_2d_hook));
     g.hud_after_fade = hook_call(sa::kIdleHudAfterFade, reinterpret_cast<void *>(&hud_after_fade_hook));
     g.messages_after_fade = hook_call(sa::kIdleMessages, reinterpret_cast<void *>(&messages_after_fade_hook));
+    g.garage_text = hook_call(sa::kRender2dGarageText, reinterpret_cast<void *>(&garage_text_hook));
     g.mouse_set_pos = hook_call(sa::kIdleMouseSetPos, reinterpret_cast<void *>(&mouse_set_pos_hook));
     g.update_pads = hook_call(sa::kGameUpdatePads, reinterpret_cast<void *>(&update_pads_hook));
     g.hide_peds = hook_call(sa::kNearClipHidePeds, reinterpret_cast<void *>(&hide_peds_hook));
@@ -127,9 +144,10 @@ void install_hooks() {
                                            reinterpret_cast<void *>(&release_video_memory_hook));
     standin::install_hooks();
     damage::install_hooks();
-    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d, text %d %d %d, mouse %d, pads %d, hide peds %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
+    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d %d %d %d, kept %d, mouse %d, pads %d, hide peds %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
                   g.idle_end_update != 0, g.frontend_end_update != 0, g.hud != 0, g.radio_name != 0,
                   g.pickup_text != 0, g.messages_2d != 0, g.hud_after_fade != 0, g.messages_after_fade != 0,
+                  g.garage_text != 0,
                   g.mouse_set_pos != 0, g.update_pads != 0, g.hide_peds != 0, g.release_video_memory != nullptr);
 }
 

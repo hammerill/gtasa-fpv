@@ -44,6 +44,18 @@ constexpr int kGridX = 64, kGridY = 36;  // cells; the warp is smooth, so this i
 std::vector<Vertex> g_grid;
 std::vector<uint16_t> g_grid_indices;
 
+// The kept game UI: what the game drew this frame between begin_kept_ui and
+// end_kept_ui, premultiplied alpha, at the back buffer's size.
+IDirect3DTexture9 *g_ui = nullptr;
+UINT g_ui_w = 0, g_ui_h = 0;
+bool g_ui_drawn = false;  // this frame
+struct UiCapture {
+    IDirect3DSurface9 *rt = nullptr, *depth = nullptr;
+    D3DVIEWPORT9 viewport;
+    DWORD separate, src_alpha, dest_alpha, color_write;
+    bool on = false;
+} g_capture;
+
 // Signal lost: analog static, regenerated every frame and stretched to the screen.
 constexpr UINT kStaticW = 320, kStaticH = 180;
 IDirect3DTexture9 *g_static = nullptr;
@@ -148,6 +160,24 @@ void draw(IDirect3DDevice9 *dev, const fpv_draw_data &dd, float sx = 1, float sy
                                         g_vertices.data() + cmd.vertex_offset, sizeof(Vertex));
         }
     }
+}
+
+// The kept game UI straight over the screen (no video feed): no lens, under the OSD.
+void draw_kept_ui(IDirect3DDevice9 *dev, float w, float h) {
+    Vertex quad[4] = {{-0.5f, -0.5f, 0, 1, 0xffffffffu, 0, 0},
+                      {w - 0.5f, -0.5f, 0, 1, 0xffffffffu, 1, 0},
+                      {-0.5f, h - 0.5f, 0, 1, 0xffffffffu, 0, 1},
+                      {w - 0.5f, h - 0.5f, 0, 1, 0xffffffffu, 1, 1}};
+    RECT full = {0, 0, LONG(w), LONG(h)};
+    dev->SetScissorRect(&full);
+    dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);  // premultiplied
+    dev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+    dev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    dev->SetTexture(0, g_ui);
+    dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
+    dev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    dev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 }
 
 // libfpv's lens (docs/INTEGRATION.md#lens-distortion) as a mesh instead of a
@@ -534,8 +564,71 @@ void drone_model(IDirect3DDevice9 *dev) {
                       proj._11, proj._22, proj._33, proj._43);
 }
 
-namespace {
-}  // namespace
+bool begin_kept_ui(IDirect3DDevice9 *dev) {
+    if (g_capture.on) return false;
+    IDirect3DSurface9 *backbuffer = nullptr;
+    if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer))) return false;
+    D3DSURFACE_DESC desc;
+    backbuffer->GetDesc(&desc);
+    backbuffer->Release();
+    if (!g_ui || g_ui_w != desc.Width || g_ui_h != desc.Height) {
+        if (g_ui) g_ui->Release();
+        g_ui = nullptr;
+        g_ui_w = g_ui_h = 0;
+        if (FAILED(dev->CreateTexture(desc.Width, desc.Height, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
+                                      D3DPOOL_DEFAULT, &g_ui, nullptr))) {
+            static int reported = 0;
+            if (reported++ < 3) fpvlog::write("render: no kept UI layer: the game UI stays hidden");
+            return false;
+        }
+        g_ui_w = desc.Width, g_ui_h = desc.Height;
+    }
+    IDirect3DSurface9 *surface = nullptr;
+    if (FAILED(g_ui->GetSurfaceLevel(0, &surface))) return false;
+    UiCapture &c = g_capture;
+    dev->GetRenderTarget(0, &c.rt);
+    dev->GetDepthStencilSurface(&c.depth);
+    dev->GetViewport(&c.viewport);
+    dev->GetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, &c.separate);
+    dev->GetRenderState(D3DRS_SRCBLENDALPHA, &c.src_alpha);
+    dev->GetRenderState(D3DRS_DESTBLENDALPHA, &c.dest_alpha);
+    dev->GetRenderState(D3DRS_COLORWRITEENABLE, &c.color_write);
+    HRESULT hr = dev->SetRenderTarget(0, surface);
+    surface->Release();
+    if (FAILED(hr)) {
+        if (c.rt) c.rt->Release();
+        if (c.depth) c.depth->Release();
+        c = UiCapture{};
+        return false;
+    }
+    dev->SetDepthStencilSurface(nullptr);  // the game's may be multisampled; 2D needs none
+    dev->SetViewport(&c.viewport);
+    if (!g_ui_drawn) dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    // The game blends SRCALPHA / INVSRCALPHA: with the alpha blended ONE /
+    // INVSRCALPHA the layer comes out premultiplied, with its true coverage.
+    dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+    dev->SetRenderState(D3DRS_SRCBLENDALPHA, D3DBLEND_ONE);
+    dev->SetRenderState(D3DRS_DESTBLENDALPHA, D3DBLEND_INVSRCALPHA);
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xf);
+    c.on = true;
+    g_ui_drawn = true;
+    return true;
+}
+
+void end_kept_ui(IDirect3DDevice9 *dev) {
+    UiCapture &c = g_capture;
+    if (!c.on) return;
+    dev->SetRenderTarget(0, c.rt);
+    dev->SetDepthStencilSurface(c.depth);
+    dev->SetViewport(&c.viewport);
+    dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, c.separate);
+    dev->SetRenderState(D3DRS_SRCBLENDALPHA, c.src_alpha);
+    dev->SetRenderState(D3DRS_DESTBLENDALPHA, c.dest_alpha);
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE, c.color_write);
+    if (c.rt) c.rt->Release();
+    if (c.depth) c.depth->Release();
+    c = UiCapture{};
+}
 
 void frame(IDirect3DDevice9 *dev, bool in_game) {
     if (!fpvapi::loaded()) {
@@ -566,6 +659,10 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
     fpv.fpv_overlay_set_display(w, h, h > 1080.0f ? h / 1080.0f : 1.0f);
     if (fpv.fpv_overlay_is_open()) feed_mouse(dev, w, h);
 
+    // The kept game UI drawn this frame (a fresh layer each frame).
+    bool kept_ui = in_game && g_ui_drawn && g_ui;
+    g_ui_drawn = false;
+
     static fpv_frame snapshot;
     const fpv_draw_data *osd = nullptr;
     bool no_signal = false;
@@ -579,7 +676,7 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
     bool goggles = feed && (!no_signal || (feed & FPV_VIDEO_FEED_NOISE)) && video::usable();
     if (want_osd && !goggles) osd = fpv.fpv_osd_draw_data(&snapshot, w, h, FPV_OSD_STYLE_ANALOG);
     const fpv_draw_data *overlay = fpv.fpv_overlay_render(dt);
-    if (!goggles && !lens && !no_signal && (!osd || !osd->list_count) && (!overlay || !overlay->list_count)) {
+    if (!goggles && !lens && !no_signal && !kept_ui && (!osd || !osd->list_count) && (!overlay || !overlay->list_count)) {
         save_screenshot(dev, backbuffer, desc);
         backbuffer->Release();
         return;
@@ -601,7 +698,8 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
     saved.save(dev);
     setup_state(dev, w, h);
     if (goggles && !(copy_scene(dev, backbuffer, desc) &&
-                     video::draw(dev, g_scene, desc.Width, desc.Height, desc.Width, desc.Height, snapshot, want_osd, &draw_ui))) {
+                     video::draw(dev, g_scene, kept_ui ? g_ui : nullptr, desc.Width, desc.Height, desc.Width, desc.Height,
+                                 snapshot, want_osd, &draw_ui))) {
         static int reported = 0;
         if (reported++ < 3) fpvlog::write("render: video feed pass failed: the plain view instead");
         goggles = false;
@@ -617,6 +715,8 @@ void frame(IDirect3DDevice9 *dev, bool in_game) {
         static int reported = 0;
         if (reported++ < 3) fpvlog::write("render: static pass failed");
     }
+    // with no video feed: over the lens's picture, under the OSD; gone in the snow
+    if (kept_ui && !goggles && !no_signal) draw_kept_ui(dev, w, h);
     if (osd) draw(dev, *osd);
     if (overlay) draw(dev, *overlay);
     saved.restore(dev);
@@ -633,6 +733,10 @@ void release() {
     g_scene_w = g_scene_h = 0;
     if (g_static) g_static->Release();
     g_static = nullptr;
+    if (g_ui) g_ui->Release();
+    g_ui = nullptr;
+    g_ui_w = g_ui_h = 0;
+    g_ui_drawn = false;
     for (Texture &t : g_textures) {
         if (t.tex) t.tex->Release();
         t = Texture{};

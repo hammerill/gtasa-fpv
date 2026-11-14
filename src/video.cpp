@@ -167,9 +167,9 @@ void upload_lines(const fpv_video_feed &vf) {
 }
 
 // What draw() changes beyond render.cpp's SavedState: the render target,
-// depth, stages 1-3 and the pixel shader constants.
-constexpr DWORD kStages = 4;
-constexpr UINT kConstants = 22;
+// depth, stages 1-4 and the pixel shader constants.
+constexpr DWORD kStages = 5;
+constexpr UINT kConstants = 23;
 const D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER,
                                               D3DSAMP_ADDRESSU,  D3DSAMP_ADDRESSV,  D3DSAMP_SRGBTEXTURE};
 constexpr size_t kNumSs = sizeof kSamplerStates / sizeof kSamplerStates[0];
@@ -232,8 +232,8 @@ uint32_t flags(const fpv_frame &f) {
 
 bool usable() { return g_state == kReady && (!g.tried || g.ok); }
 
-bool draw(IDirect3DDevice9 *dev, IDirect3DTexture9 *scene, UINT scene_w, UINT scene_h, UINT fb_w, UINT fb_h,
-          const fpv_frame &f, bool draw_osd, DrawUi draw_ui) {
+bool draw(IDirect3DDevice9 *dev, IDirect3DTexture9 *scene, IDirect3DTexture9 *ui, UINT scene_w, UINT scene_h,
+          UINT fb_w, UINT fb_h, const fpv_frame &f, bool draw_osd, DrawUi draw_ui) {
     if (!ensure(dev) || !scene || !fb_w || !fb_h || !scene_w || !scene_h) return false;
     const fpv_video_feed &vf = f.video_feed;
     uint32_t fl = flags(f);
@@ -317,6 +317,7 @@ bool draw(IDirect3DDevice9 *dev, IDirect3DTexture9 *scene, UINT scene_w, UINT sc
             sampler(dev, 1, osd_in ? g.osd : nullptr, true);
             sampler(dev, 2, g.lines, false);
             sampler(dev, 3, g.tex[1 - next], true);  // the last frame (never the target itself)
+            sampler(dev, 4, ui, true);
             float c[kConstants][4] = {};
             c[0][0] = float(w), c[0][1] = float(h);
             c[1][0] = noise;
@@ -341,6 +342,10 @@ bool draw(IDirect3DDevice9 *dev, IDirect3DTexture9 *scene, UINT scene_w, UINT sc
             c[19][0] = vf.block_errors;
             c[20][0] = noise ? vf.softness : 0.0f;
             c[21][0] = float(kLineRows);
+            if (ui) {  // the picture's place on the screen, where the game drew its UI
+                c[22][0] = rx / float(fb_w), c[22][1] = ry / float(fb_h);
+                c[22][2] = rw / float(fb_w), c[22][3] = rh / float(fb_h);
+            }
             dev->SetPixelShaderConstantF(0, &c[0][0], kConstants);
             quad(dev, g.ps[mode]);
             g.cur = next;
