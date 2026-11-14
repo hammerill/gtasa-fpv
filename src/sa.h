@@ -84,7 +84,8 @@ constexpr CallSite kRender2dHud = {0x53E4FF, 0x58FAE0};         // CHud::Draw()
 constexpr CallSite kRender2dMessages = {0x53E515, 0x69EFC0};    // CMessages::Display(true)
 // CGarages::PrintMessages(): garage messages, and the collectibles' count
 // (oysters, horseshoes, tags, snapshots: CGarages::TriggerMessage).
-constexpr CallSite kRender2dGarageText = {0x53E50E, 0x44CC20};
+// (0x53E50E -> 0x44CC20 is COnscreenTimer::ProcessForDisplay, thiscall: not this.)
+constexpr CallSite kRender2dGarageText = {0x53E522, 0x447790};
 // CCamera::Process (0x52B730): CDraw::SetFOV(fov), right before
 // CalculateDerivedValues (frustum) and CopyCameraMatrixToRWCam.
 constexpr CallSite kCameraSetFov = {0x52C976, 0x6FF410};
