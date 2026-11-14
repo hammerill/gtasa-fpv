@@ -4,6 +4,8 @@
 // on the first tick and removes them before it is unloaded.
 #include <windows.h>
 
+#include <cmath>
+
 #include <d3d9.h>
 
 #include "autotest.h"
@@ -23,7 +25,7 @@ namespace {
 // What the redirected calls went to before (the game, or another mod).
 struct Original {
     uintptr_t set_fov, render_scene, idle_end_update, frontend_end_update, hud, radio_name, pickup_text, messages_2d,
-        hud_after_fade, messages_after_fade, garage_text, mouse_set_pos, update_pads, hide_peds;
+        hud_after_fade, messages_after_fade, garage_text, mouse_set_pos, update_pads, hide_peds, cover_los;
     void *release_video_memory;
 };
 Original g;
@@ -123,6 +125,32 @@ bool __cdecl hide_peds_hook(void *a, void *b, void *c) {
     return reinterpret_cast<bool(__cdecl *)(void *, void *, void *)>(g.hide_peds)(a, b, c);
 }
 
+// A cop's cover spot -> CWorld::GetIsLineOfSightClear(spot, ped). The game
+// doesn't check that the spot was found, and an unset one (stack junk, seen as
+// 4.6e-38 1.4e20 1) walks that many sectors there: a minute's freeze. No
+// clear line, so no cover there.
+bool sane_point(const sa::CVector &v) {
+    const float kFar = 20000.0f;  // the map is +-3000
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z) && std::fabs(v.x) < kFar &&
+           std::fabs(v.y) < kFar && std::fabs(v.z) < kFar;
+}
+bool __cdecl cover_los_hook(const sa::CVector &a, const sa::CVector &b, bool buildings, bool vehicles, bool peds,
+                            bool objects, bool dummies, bool see_through, bool ignore_some) {
+    if (!sane_point(a) || !sane_point(b)) {
+        static DWORD last_log = 0;
+        DWORD now = GetTickCount();
+        if (now - last_log > 1000) {
+            last_log = now;
+            fpvlog::write("cover: bad line of sight %g %g %g -> %g %g %g, skipped (would hang the game)", a.x, a.y, a.z,
+                          b.x, b.y, b.z);
+        }
+        return false;
+    }
+    return reinterpret_cast<bool(__cdecl *)(const sa::CVector &, const sa::CVector &, bool, bool, bool, bool, bool,
+                                            bool, bool)>(g.cover_los)(a, b, buildings, vehicles, peds, objects,
+                                                                       dummies, see_through, ignore_some);
+}
+
 uintptr_t hook_call(const sa::CallSite &at, void *hook) { return patch::redirect_call(at.site, at.fn, hook); }
 
 void install_hooks() {
@@ -140,15 +168,17 @@ void install_hooks() {
     g.mouse_set_pos = hook_call(sa::kIdleMouseSetPos, reinterpret_cast<void *>(&mouse_set_pos_hook));
     g.update_pads = hook_call(sa::kGameUpdatePads, reinterpret_cast<void *>(&update_pads_hook));
     g.hide_peds = hook_call(sa::kNearClipHidePeds, reinterpret_cast<void *>(&hide_peds_hook));
+    g.cover_los = hook_call(sa::kCoverLineOfSight, reinterpret_cast<void *>(&cover_los_hook));
     g.release_video_memory = patch::detour(0x7F7F70, kReleaseVideoMemoryPrologue, sizeof kReleaseVideoMemoryPrologue,
                                            reinterpret_cast<void *>(&release_video_memory_hook));
     standin::install_hooks();
     damage::install_hooks();
-    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d %d %d %d, kept %d, mouse %d, pads %d, hide peds %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
+    fpvlog::write("hooks: camera %d, scene %d, frame %d/%d, hud %d %d %d %d %d %d, kept %d, mouse %d, pads %d, hide peds %d, cover los %d, device reset %d", g.set_fov != 0, g.render_scene != 0,
                   g.idle_end_update != 0, g.frontend_end_update != 0, g.hud != 0, g.radio_name != 0,
                   g.pickup_text != 0, g.messages_2d != 0, g.hud_after_fade != 0, g.messages_after_fade != 0,
                   g.garage_text != 0,
-                  g.mouse_set_pos != 0, g.update_pads != 0, g.hide_peds != 0, g.release_video_memory != nullptr);
+                  g.mouse_set_pos != 0, g.update_pads != 0, g.hide_peds != 0, g.cover_los != 0,
+                  g.release_video_memory != nullptr);
 }
 
 // The first reading of each key is only a baseline: a key held while the

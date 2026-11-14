@@ -91,6 +91,12 @@ constexpr CallSite kCameraSetFov = {0x52C976, 0x6FF410};
 // CCamera::ImproveNearClip: hides the peds close to the game's own camera
 // (they come back next frame), a function the crack moved to .HOODLUM.
 constexpr CallSite kNearClipHidePeds = {0x517115, 0x4154A0};
+// A ped task's ProcessPed (0x62BF00): CCover::FindAndReserveCoverPoint, then
+// FindCoordinatesCoverPoint (0x699570, its result unchecked: on failure the
+// spot is stack junk), then CWorld::GetIsLineOfSightClear(spot, ped). Its
+// sector walk clamps its index but not its step count: a junk spot like
+// y = 1.4e20 hangs the game for about a minute.
+constexpr CallSite kCoverLineOfSight = {0x62C0A3, 0x56A490};
 
 // Detour targets (function entry, the whole instructions we move, their bytes).
 // FindPlayerCoors(int) returns its CVector through a hidden pointer; the
