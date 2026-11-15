@@ -56,7 +56,8 @@ target_link_libraries(gtasa_fpv_core PRIVATE winmm d3d9)
 target_compile_definitions(gtasa_fpv_core PRIVATE FPVLOG_APPEND)
 
 foreach(target gtasa_fpv_loader gtasa_fpv_core)
-  target_include_directories(${target} PRIVATE src "${LIBFPV_DIR}/include")
+  # docs/renderers: fpv_video_d3d9.h, the video feed's renderer (src/video.cpp)
+  target_include_directories(${target} PRIVATE src "${LIBFPV_DIR}/include" "${LIBFPV_DIR}/docs/renderers")
   # libfpv.dll is loaded at runtime; the header is only used for declarations.
   # Kamikaze declarations too: the core finds out at runtime whether the
   # loaded libfpv.dll has them (src/fpvapi.cpp), so either build works.

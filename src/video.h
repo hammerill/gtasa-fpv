@@ -1,7 +1,7 @@
 // The video feed (libfpv's frame.video_feed, docs/INTEGRATION.md#the-video-feed)
-// drawn with Direct3D 9: a port of docs/renderers/fpv_video_gl3.h. The analog
-// link's noise, digital breakup, and the camera's resolution and aspect with
-// black bars, plus the lens.
+// drawn with Direct3D 9 by libfpv's docs/renderers/fpv_video_d3d9.h: the
+// analog link's noise, digital breakup, and the camera's resolution and aspect
+// with black bars, plus the lens.
 #pragma once
 
 #include <d3d9.h>
