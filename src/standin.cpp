@@ -27,6 +27,7 @@ sa::CVector g_drone{};     // latest drone position
 sa::CVector g_placed{};    // where CJ was last re-added
 uint32_t g_saved_flags = 0;
 bool g_seated = false;  // Body mode from a vehicle: he goes back in it afterwards
+pilot::Seat g_seat{};    // where he sat in it
 
 // Queries mode: CJ's car. Streaming follows the drone, so with the drone far
 // the ground's collision under it goes away (it would sink through the map):
@@ -241,6 +242,31 @@ float dot(const sa::CVector &a, const sa::CVector &b) { return a.x * b.x + a.y *
 // v in the frame of m's axes.
 sa::CVector to_local(const sa::CMatrix &m, const sa::CVector &v) { return {dot(v, m.right), dot(v, m.forward), dot(v, m.up)}; }
 
+// v from the frame of m's axes to the world's.
+sa::CVector to_world(const sa::CMatrix &m, const sa::CVector &v) {
+    return {m.right.x * v.x + m.forward.x * v.y + m.up.x * v.z, m.right.y * v.x + m.forward.y * v.y + m.up.y * v.z,
+            m.right.z * v.x + m.forward.z * v.y + m.up.z * v.z};
+}
+
+// Back in his car: in his seat this very frame. The stand-in ends from the
+// drone's step inside CCamera::Process, after the world's update, so the game
+// only seats him (SetPedPositionInCar) next frame: meanwhile he was drawn,
+// visible again, where he stood in, right at the drone's camera (his legs
+// across the picture for a frame).
+void seat_now(sa::CPed *cj, sa::CVehicle *car) {
+    if (!cj->matrix || !car->matrix) return;
+    const sa::CMatrix &c = *car->matrix;
+    sa::CVector o = to_world(c, g_seat.offset);
+    sa::WorldRemove(cj);
+    cj->matrix->right = to_world(c, g_seat.axes[0]);
+    cj->matrix->forward = to_world(c, g_seat.axes[1]);
+    cj->matrix->up = to_world(c, g_seat.axes[2]);
+    cj->matrix->pos = {c.pos.x + o.x, c.pos.y + o.y, c.pos.z + o.z};
+    sa::WorldAdd(cj);
+    sa::move_speed(cj) = sa::turn_speed(cj) = {0, 0, 0};
+    pilot::moved(cj);
+}
+
 // From the driver's seat: CJ gets out on the spot (as WARP_CHAR_FROM_CAR_TO_COORD
 // does), so he stands in on foot like anywhere else (peds look at him, pickups
 // see him), and pilot.cpp draws him in his seat. False: he is still in it.
@@ -273,6 +299,7 @@ void begin() {
             return;
         }
         g_seated = true;
+        g_seat = seat;
         fpvlog::write("standin: CJ out of his vehicle (created by %d, seat anim %s)", g_car_created_by,
                       seat.anim ? "found" : "missing");
     }
@@ -362,6 +389,7 @@ void end(bool go_home) {
     if (g_seated && car) {  // back behind the wheel, home or not ("Move CJ here" takes the car along)
         sa::WarpIntoCarAsDriver(cj, car);
         bool in = sa::FindPlayerVehicle() == car;
+        if (in) seat_now(cj, car);
         fpvlog::write("standin: over, CJ back in his vehicle%s", in ? "" : " (FAILED)");
         void *audio = reinterpret_cast<uint8_t *>(car) + kVehicleAudio;
         if (!in && g_radio_kept && audio_vehicle(audio) == car) {  // on foot after all: the radio goes off
@@ -386,6 +414,7 @@ void end(bool go_home) {
         sa::Teleport(cj, g_home, false);
     }
     sa::set_ped_heading(cj, g_home_heading);
+    pilot::moved(cj);  // drawn at home this frame, not at the drone
     fpvlog::write("standin: over, CJ back at %.2f %.2f %.2f", g_home.x, g_home.y, g_home.z);
 }
 

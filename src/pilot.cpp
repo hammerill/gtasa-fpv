@@ -478,4 +478,12 @@ void away(const sa::CVector *home, const Seat *seat) {
     }
 }
 
+void moved(sa::CPed *cj) {
+    if (!cj || !cj->matrix) return;
+    sa::entity_flags(cj) &= ~kEntityOffscreen;
+    UpdateRW(cj);
+    UpdateRwFrame(cj);
+    if (rw_object(cj)) UpdateRpHAnim(cj);
+}
+
 }  // namespace pilot

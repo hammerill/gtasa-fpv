@@ -37,4 +37,9 @@ void *seat_anim(sa::CPed *cj);
 // from a vehicle) or off (null).
 void away(const sa::CVector *home, const Seat *seat = nullptr);
 
+// CJ just moved for good (back in his seat or at his spot as a stand-in ends):
+// his RwFrame and skin follow now, not at the game's next update, so this
+// frame doesn't draw him where he was (at the drone, in front of its camera).
+void moved(sa::CPed *cj);
+
 }  // namespace pilot
