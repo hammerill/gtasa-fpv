@@ -20,10 +20,16 @@
 // warped into the nearest car, put beside him, before the launch: the stand-in from a vehicle),
 // pickup=<s> (at that flight time, a pistol pickup 1 s ahead on the drone's path; its state and
 // CJ's pistol ammo are logged). While flying, the peds looking at CJ (IK look-at) are logged every 2 s.
+// "perch": the nearest car (or a new one of model=<id>) is parked 5 m ahead of CJ and at perchat=<s>
+// (2.5) the disarmed drone is dropped on its roof from perchh=<m> (0.12) over it (perchx=<m>,
+// perchy=<m> off the roof's centre to the right / forward), then
+// from driveat=<s> (5) the car is pushed along at drive=<km/h> (0: stays parked), turning at
+// turn=<deg/s> ("rayplain": the raycast without the car's pose, as before libfpv 1.0.9). The drone's place in the car's frame is logged every frame, and a summary at the end.
 #include "autotest.h"
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +42,7 @@
 #include "log.h"
 #include "paths.h"
 #include "sa.h"
+#include "world.h"
 
 namespace autotest {
 namespace {
@@ -49,6 +56,9 @@ struct Config {
     int wanted = -1, hour = -1, weather = -2;  // weather -2: untouched
     float ped_at = 0, car_at = 0, pickup_at = 0;
     bool in_car = false;
+    bool perch = false;
+    float perch_at = 2.5f, drive_at = 5, drive_kmh = 0, turn_dps = 0, perch_x = 0, perch_y = 0, perch_h = 0.12f;
+    int model = 0;  // a new car of this model for the perch (0: the nearest, or a Greenwood)
     float at[4] = {};
     char end_action = 0;  // 'r', 'y' or '7' during a blast's ending
     float end_action_at = 1;
@@ -98,6 +108,17 @@ void read_config() {
     if (const char *p = std::strstr(buf, "car=")) g_cfg.car_at = float(std::atof(p + 4));
     if (const char *p = std::strstr(buf, "pickup=")) g_cfg.pickup_at = float(std::atof(p + 7));
     g_cfg.in_car = std::strstr(buf, "incar") != nullptr;
+    g_cfg.perch = std::strstr(buf, "perch") != nullptr;
+    if (const char *p = std::strstr(buf, "perchat=")) g_cfg.perch_at = float(std::atof(p + 8));
+    if (const char *p = std::strstr(buf, "perchx=")) g_cfg.perch_x = float(std::atof(p + 7));
+    if (const char *p = std::strstr(buf, "perchy=")) g_cfg.perch_y = float(std::atof(p + 7));
+    if (const char *p = std::strstr(buf, "perchh=")) g_cfg.perch_h = float(std::atof(p + 7));
+    if (const char *p = std::strstr(buf, "model=")) g_cfg.model = std::atoi(p + 6);
+    if (const char *p = std::strstr(buf, "driveat=")) g_cfg.drive_at = float(std::atof(p + 8));
+    if (const char *p = std::strstr(buf, "drive=")) g_cfg.drive_kmh = float(std::atof(p + 6));
+    if (const char *p = std::strstr(buf, "turn=")) g_cfg.turn_dps = float(std::atof(p + 5));
+    if (g_cfg.perch) g_cfg.still = true;
+    fpvapi::g_plain_raycast = std::strstr(buf, "rayplain") != nullptr;
     if (const char *p = std::strstr(buf, "time=")) g_cfg.hour = std::atoi(p + 5);
     if (const char *p = std::strstr(buf, "weather=")) g_cfg.weather = std::atoi(p + 8);
     if (const char *p = std::strstr(buf, "wanted=")) g_cfg.wanted = std::atoi(p + 7);
@@ -222,8 +243,19 @@ void place_target_ped(float ahead) {
                   at.x, at.y, at.z);
 }
 
-// The nearest vehicle without CJ in it, `ahead` metres in front of CJ, across his path.
-void place_target_car(float ahead) {
+// A Greenwood (492), a random car as far as the population knows, at `at`.
+sa::CVehicle *create_car(sa::CVector at, int model = 492) {
+    reinterpret_cast<void(__cdecl *)(int, int)>(0x4087E0)(model, 0x10);         // CStreaming::RequestModel
+    reinterpret_cast<void(__cdecl *)(bool)>(0x40EA10)(false);                 // LoadAllRequestedModels
+    using Create = sa::CVehicle *(__cdecl *)(int, sa::CVector, uint8_t);      // CCarCtrl::CreateCarForScript
+    sa::CVehicle *car = reinterpret_cast<Create>(0x431F80)(model, at, 0);
+    if (car) sa::vehicle_created_by(car) = sa::kVehicleRandom;
+    return car;
+}
+
+// The nearest vehicle without CJ in it, `ahead` metres in front of CJ, across his path
+// (with `create`, a new car when there is none within 50 m).
+void place_target_car(float ahead, bool create = false) {
     sa::CPed *cj = sa::FindPlayerPed();
     sa::Pool *pool = sa::vehicle_pool();
     if (!cj || !cj->matrix || !pool) return;
@@ -238,11 +270,15 @@ void place_target_car(float ahead) {
         float d = (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y);
         if (d < best_d) best_d = d, best = v;
     }
+    sa::CVector at{c.x + f.x * ahead, c.y + f.y * ahead, c.z + 0.5f};
+    if (((!best || best_d > 50 * 50) && create) || (create && g_cfg.model > 0)) {
+        best = create_car(at, g_cfg.model > 0 ? g_cfg.model : 492);
+        if (best) fpvlog::write("autotest: created a car as the target");
+    }
     if (!best) {
         fpvlog::write("autotest: no vehicle to use as a target");
         return;
     }
-    sa::CVector at{c.x + f.x * ahead, c.y + f.y * ahead, c.z + 0.5f};
     // A parked physics car (STATUS_ABANDONED in the bits above the entity type):
     // path-following traffic places itself and would drive off the spot.
     uint8_t &status = reinterpret_cast<uint8_t *>(best)[0x36];
@@ -287,16 +323,12 @@ void put_cj_in_car() {
         float d = (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y);
         if (d < best_d) best_d = d, best = v;
     }
-    if (!best || best_d > 30 * 30) {  // none around: a Greenwood (492), a random car as far as the population knows
-        reinterpret_cast<void(__cdecl *)(int, int)>(0x4087E0)(492, 0x10);           // CStreaming::RequestModel
-        reinterpret_cast<void(__cdecl *)(bool)>(0x40EA10)(false);                 // LoadAllRequestedModels
-        using Create = sa::CVehicle *(__cdecl *)(int, sa::CVector, uint8_t);      // CCarCtrl::CreateCarForScript
-        best = reinterpret_cast<Create>(0x431F80)(492, {c.x + r.x * 3, c.y + r.y * 3, c.z + 0.5f}, 0);
+    if (!best || best_d > 30 * 30) {  // none around
+        best = create_car({c.x + r.x * 3, c.y + r.y * 3, c.z + 0.5f});
         if (!best) {
             fpvlog::write("autotest: no car for CJ");
             return;
         }
-        sa::vehicle_created_by(best) = sa::kVehicleRandom;
         fpvlog::write("autotest: created a car for CJ");
     }
     if (sa::CPed *driver = sa::vehicle_driver(best)) {  // traffic: its driver gets out and walks
@@ -356,13 +388,129 @@ void log_lookers(float t) {
         fpvlog::write("autotest: pickup type %d, CJ's pistol ammo %d", pickup_type(g_pickup), pistol_ammo(cj));
 }
 
+// --- perch: the drone on a car's roof ---
+int g_perch_car = 0;   // vehicle handle
+bool g_perched = false;
+float g_perch_l0[3];   // where it came to rest, in the car's frame
+struct PerchStats {
+    float slip = 0, lift = 0, low = 0;
+    int frames = 0, off = 0;
+    bool fell = false;
+    float fell_at = -1;
+} g_ps;
+
+// p (world) in the car's frame: right, forward, up from its matrix position.
+void car_local(const sa::CMatrix &m, const float p[3], float out[3]) {
+    float d[3] = {p[0] - m.pos.x, p[1] - m.pos.y, p[2] - m.pos.z};
+    out[0] = d[0] * m.right.x + d[1] * m.right.y + d[2] * m.right.z;
+    out[1] = d[0] * m.forward.x + d[1] * m.forward.y + d[2] * m.forward.z;
+    out[2] = d[0] * m.up.x + d[1] * m.up.y + d[2] * m.up.z;
+}
+
+void perch_tick(float t) {
+    sa::CVehicle *car = g_perch_car ? sa::GetVehicle(g_perch_car) : nullptr;
+    if (!car || !car->matrix) return;
+    const sa::CMatrix &m = *car->matrix;
+    if (!g_perched && t >= g_cfg.perch_at) {
+        // the roof under the centre (perchx/perchy off it): a ray down from above the car
+        float o[3] = {m.pos.x + m.right.x * g_cfg.perch_x + m.forward.x * g_cfg.perch_y,
+                      m.pos.y + m.right.y * g_cfg.perch_x + m.forward.y * g_cfg.perch_y, m.pos.z + 4};
+        float down[3] = {0, 0, -1};
+        fpv_raycast_hit hit{};
+        sa::CEntity *e = nullptr;
+        if (!world::probe(o, down, 8, &hit, &e) || e != car) {
+            fpvlog::write("autotest: perch: no roof under the drone (hit %p, car %p)", static_cast<void *>(e),
+                          static_cast<void *>(car));
+            g_perch_car = 0;
+            return;
+        }
+        float at[3] = {o[0], o[1], o[2] - hit.distance + g_cfg.perch_h};
+        drone::place(at);
+        g_perched = true;
+        g_ps = PerchStats{};
+        g_perch_l0[0] = -1e9f;
+        fpvlog::write("autotest: perch: drone put on car %d's roof at %.2f %.2f %.2f (roof %.2f, n %.2f %.2f %.2f)",
+                      g_perch_car, at[0], at[1], at[2], o[2] - hit.distance, hit.normal[0], hit.normal[1],
+                      hit.normal[2]);
+        return;
+    }
+    if (!g_perched) return;
+    if (g_cfg.drive_kmh > 0 && t >= g_cfg.drive_at) {
+        // pushed along its nose (SA speeds are metres per 1/50 s), its own physics for the rest
+        reinterpret_cast<uint8_t *>(car)[0x1C] &= ~uint8_t(1u << 2);  // bIsStatic: awake
+        float v = g_cfg.drive_kmh / 3.6f / 50.0f;
+        float ramp = std::min(1.0f, (t - g_cfg.drive_at) / 3.0f);  // 3 s up to speed
+        sa::CVector &ms = sa::move_speed(car);
+        float fx = m.forward.x, fy = m.forward.y, fl = std::sqrt(fx * fx + fy * fy);
+        if (fl > 1e-3f) ms.x = fx / fl * v * ramp, ms.y = fy / fl * v * ramp;
+        sa::turn_speed(car).z = g_cfg.turn_dps / 57.2957795f / 50.0f * ramp;
+    }
+    const fpv_frame &f = drone::last_frame();
+    float l[3];
+    car_local(m, f.position, l);
+    bool ground = (f.flags & FPV_DRONE_ON_GROUND) != 0;
+    if (t < g_cfg.perch_at + 1.0f) {  // settling: measured from where it came to rest
+        std::memcpy(g_perch_l0, l, sizeof l);
+        return;
+    }
+    float dx = l[0] - g_perch_l0[0], dy = l[1] - g_perch_l0[1], lift = l[2] - g_perch_l0[2];
+    float slip = std::sqrt(dx * dx + dy * dy);
+    g_ps.frames++;
+    if (!ground) g_ps.off++;
+    if (!g_ps.fell) {
+        g_ps.slip = std::max(g_ps.slip, slip);
+        g_ps.lift = std::max(g_ps.lift, lift);
+        g_ps.low = std::min(g_ps.low, lift);
+        if (lift < -0.3f || slip > 1.5f) {
+            g_ps.fell = true;
+            g_ps.fell_at = t;
+            fpvlog::write("autotest: perch: FELL off at %.2f s (slip %.2f, lift %.2f)", t, slip, lift);
+        }
+    }
+    // every 15th frame, and every frame off the roof or lifted: where it is on
+    // the car, the car's speed, and the drone's tilt (its up axis) on it
+    static int n = 0;
+    if (!ground || std::fabs(lift) > 0.008f || ++n % 15 == 0) {
+        const sa::CVector &ms = sa::move_speed(car);
+        const float *q = f.rotation;
+        float up[3] = {2 * (q[0] * q[2] + q[3] * q[1]), 2 * (q[1] * q[2] - q[3] * q[0]),
+                       1 - 2 * (q[0] * q[0] + q[1] * q[1])};
+        float tilt_r = up[0] * m.right.x + up[1] * m.right.y + up[2] * m.right.z;
+        float tilt_f = up[0] * m.forward.x + up[1] * m.forward.y + up[2] * m.forward.z;
+        fpvlog::write("autotest: perch %.3f on the car %+.3f %+.3f %+.3f ground %d, car %.1f km/h, tilt %+.3f %+.3f",
+                      t, l[0], l[1], l[2], ground ? 1 : 0,
+                      std::sqrt(ms.x * ms.x + ms.y * ms.y + ms.z * ms.z) * 50 * 3.6f, tilt_r, tilt_f);
+    }
+}
+
+void perch_summary() {
+    if (!g_perched) return;
+    fpvlog::write("autotest: perch summary: drive %.0f km/h turn %.0f deg/s: slip %.3f m, lift %.3f m (low %.3f), "
+                  "off the roof %.0f %% of %d frames, %s",
+                  g_cfg.drive_kmh, g_cfg.turn_dps, g_ps.slip, g_ps.lift, g_ps.low,
+                  g_ps.frames ? 100.0f * g_ps.off / g_ps.frames : 0.0f, g_ps.frames, g_ps.fell ? "FELL" : "stayed");
+    g_perched = false;
+    g_perch_car = 0;
+}
+
 void launch() {
     g_target = 0;
+    g_perch_car = 0;
+    g_perched = false;
     g_pickup = -1;
     if (g_cfg.in_car) put_cj_in_car();
 
     if (g_cfg.ped_at > 0) place_target_ped(g_cfg.ped_at);
-    if (g_cfg.car_at > 0) place_target_car(g_cfg.car_at);
+    if (g_cfg.car_at > 0 || g_cfg.perch) place_target_car(g_cfg.perch ? 5.0f : g_cfg.car_at, g_cfg.perch);
+    if (g_cfg.perch && g_target_car) {
+        g_perch_car = g_target;
+        g_target = 0;  // not held in place: the drone sits on it
+        // on its wheels on the road and awake, settled before the drone goes on
+        if (sa::CVehicle *car = sa::GetVehicle(g_perch_car)) {
+            sa::PlaceOnRoadProperly(car);
+            reinterpret_cast<uint8_t *>(car)[0x1C] &= ~uint8_t(1u << 2);  // bIsStatic
+        }
+    }
     if (fpvapi::load() && fpvapi::kamikaze())  // the player ticks it in F8 > Fly
         fpvapi::fpv.fpv_kamikaze_set_installed(g_cfg.bomb ? 1 : 0);
     if (g_cfg.hour >= 0) {
@@ -386,6 +534,7 @@ void launch() {
 }
 
 void finish(const char *why) {
+    perch_summary();
     g_running = false;
     fpvlog::write("autotest: %s", why);
     if (!drone::active()) return;
@@ -443,6 +592,7 @@ void tick() {
     if (!drone::ending()) g_blast_ms = 0;  // a new blast may follow a respawn
     sticks(t);
     hold_target();
+    perch_tick(t);
     static float next_log = 0;
     if (t < 1) next_log = 2;
     if (g_cfg.pickup_at > 0 && t >= g_cfg.pickup_at) g_cfg.pickup_at = 0, place_pickup();

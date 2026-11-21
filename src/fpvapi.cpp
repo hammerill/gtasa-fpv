@@ -9,6 +9,7 @@
 #include "log.h"
 #include "paths.h"
 #include "video.h"
+#include "world.h"
 
 namespace fpvapi {
 
@@ -96,6 +97,17 @@ void damage_props(fpv_drone *drone, int motor, float amount) {
     if (g_loaded && drone && fpv.fpv_drone_damage_props) fpv.fpv_drone_damage_props(drone, motor, amount);
 }
 
+bool g_plain_raycast = false;
+
+void set_raycast(bool on) {
+    if (!g_loaded) return;
+    if (fpv.fpv_world_set_raycast_callback_ex && !g_plain_raycast) {
+        fpv.fpv_world_set_raycast_callback_ex(on ? &world::raycast_ex : nullptr, nullptr);
+    } else {
+        fpv.fpv_world_set_raycast_callback(on ? &world::raycast : nullptr, nullptr);
+    }
+}
+
 bool kamikaze() {
     return g_loaded && fpv.fpv_kamikaze_poll_detonation && fpv.fpv_kamikaze_get_state && fpv.fpv_kamikaze_set_installed &&
            fpv.fpv_kamikaze_get_config && fpv.fpv_kamikaze_detonate;
@@ -128,6 +140,7 @@ bool load() {
     FPV_WIND_FUNCTIONS(FPV_FN)
     FPV_SHARED_FUNCTIONS(FPV_FN)
     FPV_PILOT_FUNCTIONS(FPV_FN)
+    FPV_RAYCAST_EX_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 
     std::string data_dir = pick_data_dir();
@@ -154,6 +167,13 @@ bool load() {
     if (r != FPV_OK && r != FPV_ERROR_ALREADY_INITIALIZED) {
         fpvlog::write("fpv_global_init: %s (%s)", fpv.fpv_result_string(r), fpv.fpv_last_error());
         return false;
+    }
+    // A car's paint under the drone's frame (world::raycast gives vehicle
+    // hits this material): grippier than libfpv's default smooth floor, so a
+    // perched drone doesn't slide about while the car speeds up.
+    if (fpv.fpv_material_set) {
+        fpv_material paint{0.2f, 0.5f, 0};
+        fpv.fpv_material_set(world::kMaterialVehicle, &paint);
     }
     // CJ: carried along with a far drone (standin.cpp) and posed with a radio
     // (pilot.cpp), at the distances the stand-in always had.

@@ -38,6 +38,9 @@ bool hide_text();
 // during a blast's ending (under the wreck). Game thread only.
 void move_cj_here();
 
+// Puts the drone at pos (world), upright with its heading kept, at rest. Autotest only.
+void place(const float pos[3]);
+
 // Back to the launch point, repaired (R key). Cuts a blast's ending short. Game thread only.
 void respawn();
 

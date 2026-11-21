@@ -34,6 +34,10 @@ namespace fpvapi {
 // The pilot, the views and the game's own prop damage (2026-11); null with an
 // older libfpv.dll: then the stand-in and the pose are always on (20 m / 10 m),
 // the sound is onboard in every view and only libfpv's own hits break props.
+// Raycast hits that carry the pose of what they hit (libfpv 1.0.9); null
+// with an older libfpv.dll, whose planes on cars then stay where they were hit.
+#define FPV_RAYCAST_EX_FUNCTIONS(X) X(fpv_world_set_raycast_callback_ex) X(fpv_material_set)
+
 #define FPV_PILOT_FUNCTIONS(X)                                                                   \
     X(fpv_set_view) X(fpv_audio_set_listener) X(fpv_drone_set_pilot_position)                    \
     X(fpv_pilot_set_support) X(fpv_pilot_get_config) X(fpv_drone_damage_props)
@@ -45,6 +49,7 @@ struct Api {
     FPV_WIND_FUNCTIONS(FPV_FN)
     FPV_SHARED_FUNCTIONS(FPV_FN)
     FPV_PILOT_FUNCTIONS(FPV_FN)
+    FPV_RAYCAST_EX_FUNCTIONS(FPV_FN)
 #undef FPV_FN
 };
 
@@ -66,5 +71,11 @@ fpv_pilot_config pilot_config();
 void set_view(fpv_view view);
 void set_pilot_position(fpv_drone *drone, const float feet[3]);
 void damage_props(fpv_drone *drone, int motor, float amount);
+
+// Sets the drone's world collision, the game's line test (world::raycast),
+// with the pose of what it hits when the loaded libfpv takes it; null clears it.
+void set_raycast(bool on);
+// Autotest: the plain callback even with a libfpv that takes poses (the old behaviour).
+extern bool g_plain_raycast;
 
 }  // namespace fpvapi

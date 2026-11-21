@@ -412,7 +412,7 @@ void start() {
     g_fov_before = sa::draw_fov();
     g_clock_game = sa::timer_ms();
     g_clock_real = GetTickCount();
-    fpv.fpv_world_set_raycast_callback(&world::raycast, nullptr);
+    fpvapi::set_raycast(true);
     if (fpvapi::kamikaze()) {  // detonations of earlier drones are history
         fpv_detonation d;
         d.struct_size = sizeof d;
@@ -455,7 +455,7 @@ void stop(bool go_home = true) {
     if (g_pilot_view && fpv.fpv_audio_set_listener) fpv.fpv_audio_set_listener(nullptr, nullptr);
     g_pilot_view = false;
     if (g_drone) {
-        fpv.fpv_world_set_raycast_callback(nullptr, nullptr);
+        fpvapi::set_raycast(false);
         world::ignore(nullptr);
         fpv.fpv_drone_delete(g_drone);
         g_drone = nullptr;
@@ -706,6 +706,10 @@ void move_cj_here() {
     sfx::play(sa::kSoundSelect);
     fpvlog::write("moved CJ%s to the drone: %.2f %.2f %.2f (ground %s) heading %.1f", car ? " and his vehicle" : "",
                   pos[0], pos[1], z, ground ? "hit" : "missed", heading * kRadToDeg);
+}
+
+void place(const float pos[3]) {
+    if (g_drone) fpv.fpv_drone_reset(g_drone, pos, nullptr);
 }
 
 void respawn() {

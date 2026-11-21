@@ -433,3 +433,29 @@ streaming around the drone, Move CJ here (Y), kamikaze when libfpv is a kamikaze
     second (task chain: 912 wander > 1103 police pursuit > 1101 arrest > 1000/1002 kill on foot (armed) > 1020
     gun control, 1017 use gun; 907 seek). Kept: a line per shot within 2 m of the drone, fire/water as one
     line per soak, and "props now" whenever a prop is 0.05 worse.
+- 2026-11-21: perching on cars (user report: on a parked car sometimes solid, sometimes bouncing; on a moving
+  one the drone stays behind). libfpv 1.1.2 (D41) and the mod:
+  * Ray planes had no velocity and no frame: a 20 km/h car left the drone behind in a second. The mod now sets
+    the callback with fpv_world_set_raycast_callback_ex (world::raycast_ex) and gives every hit on a vehicle,
+    ped or object its entity matrix as FPV_RAYCAST_HIT_POSE (matrix -> quaternion checked offline against
+    yaw/roll cases); libfpv moves those planes along the entity's smoothed path. Older libfpv.dll: the plain
+    callback, as before. Vehicle hits get material 1 (car paint, friction 0.5, set in fpvapi.cpp).
+  * The bounce: libfpv extended each hit's tangent plane 0.75 m. A Greenwood's line-test roof rises ~4.5 cm at
+    a rim ~0.3 m out (normals tilted to 27 deg, partly along the car); the centre's level rays hit that rim and
+    their planes stood 4 cm above the roof under the arms. The drone tipped onto them (up axis 5-8 deg back,
+    roll/pitch rates ~1 rad/s) and bounced. In a turn the world-fixed rays swept the rim and the planes changed
+    every tick. Fixed in libfpv: rays that pass through a plane cut it back (it stands only nearer its own hit
+    than any crossing), and near a surface each sphere of the drone probes down and around.
+  * SA's line test costs 1-7 us a probe here (~1800/s before, wind shelter's long rays most of them).
+  * Autotest "perch" (see the autotest.cpp header): parks or creates a car 5 m ahead, drops the disarmed drone on
+    its roof, then pushes the car along at drive=<km/h> turning at turn=<deg/s>; logs the drone in the car's
+    frame and a summary (slip, lift, frames off the roof). Use at=1900,-2493,13.6,0 (LS airport runway): in
+    Grove Street the car hits a wall within seconds. A created car must be woken (bIsStatic, entity flags bit 2)
+    and put on the road (PlaceOnRoadProperly) before the drone goes on, or it hangs 0.45 m up and drops away
+    when pushed. "rayplain" sets the plain callback (the old behaviour) for A/B runs.
+  * Results (5" freestyler): parked, centred and near the edges, 0.5 m drops, Greenwood/Landstalker/Infernus/
+    Moonbeam/Sentinel: no movement. 20 km/h straight: slip 3 cm, lift 0. 20 km/h with a 15 deg/s turn: lift
+    59-92 mm and 2-8 % of frames off the roof before, 0 mm and 0 % after; slip 11-33 cm -> 4 cm. 40 km/h: lift
+    126 mm -> 1 mm. rayplain at 20 km/h: falls off in 1.5 s. Seen once: the parked Moonbeam jumped 1.3 m in
+    one frame on its own (SA physics), and the drone fell; a rerun was still. The Infernus kicks the drone up
+    1 cm when it jolts over a runway seam.
