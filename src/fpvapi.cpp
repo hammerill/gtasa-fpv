@@ -109,8 +109,12 @@ void set_raycast(bool on) {
 }
 
 bool kamikaze() {
+#if defined(LIBFPV_KAMIKAZE)
     return g_loaded && fpv.fpv_kamikaze_poll_detonation && fpv.fpv_kamikaze_get_state && fpv.fpv_kamikaze_set_installed &&
            fpv.fpv_kamikaze_get_config && fpv.fpv_kamikaze_detonate;
+#else
+    return false;
+#endif
 }
 
 bool load() {
@@ -134,6 +138,23 @@ bool load() {
     FPV_FUNCTIONS(FPV_FN)
 #undef FPV_FN
     if (!ok) return false;
+    // libfpv.h lays fpv_frame out differently with LIBFPV_KAMIKAZE (12 radio
+    // channels instead of 10): a libfpv.dll of the other kind would fill the
+    // frame 8 bytes off from where the mod reads it (wind, impacts, the video
+    // feed: a frozen, pink picture). Refuse it instead.
+    bool dll_kamikaze = GetProcAddress(lib, "fpv_kamikaze_poll_detonation") != nullptr;
+#if defined(LIBFPV_KAMIKAZE)
+    const bool mod_kamikaze = true;
+#else
+    const bool mod_kamikaze = false;
+#endif
+    if (dll_kamikaze != mod_kamikaze) {
+        fpvlog::write("libfpv.dll is a %s build but this mod was built for a %s one: not loaded (build the mod with "
+                      "-DGTASA_FPV_KAMIKAZE=%s)",
+                      dll_kamikaze ? "kamikaze" : "plain", mod_kamikaze ? "kamikaze" : "plain",
+                      dll_kamikaze ? "ON" : "OFF");
+        return false;
+    }
 #define FPV_FN(name) \
     fpv.name = reinterpret_cast<decltype(fpv.name)>(reinterpret_cast<void *>(GetProcAddress(lib, #name)));
     FPV_KAMIKAZE_FUNCTIONS(FPV_FN)

@@ -39,6 +39,7 @@
 
 #include "drone.h"
 #include "fpvapi.h"
+#include "kamikaze.h"
 #include "log.h"
 #include "paths.h"
 #include "sa.h"
@@ -511,8 +512,10 @@ void launch() {
             reinterpret_cast<uint8_t *>(car)[0x1C] &= ~uint8_t(1u << 2);  // bIsStatic
         }
     }
+#if defined(LIBFPV_KAMIKAZE)
     if (fpvapi::load() && fpvapi::kamikaze())  // the player ticks it in F8 > Fly
         fpvapi::fpv.fpv_kamikaze_set_installed(g_cfg.bomb ? 1 : 0);
+#endif
     if (g_cfg.hour >= 0) {
         sa::clock_hours() = uint8_t(g_cfg.hour % 24);
         sa::clock_minutes() = 0;

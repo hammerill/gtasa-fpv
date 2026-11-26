@@ -16,13 +16,18 @@ namespace fpvapi {
     X(fpv_overlay_render) X(fpv_osd_draw_data) X(fpv_audio_configure) X(fpv_audio_read)          \
     X(fpv_overlay_set_action) X(fpv_overlay_poll_action) X(fpv_gps_set_home)
 
-// Only in libfpv builds with -DLIBFPV_KAMIKAZE=ON; null otherwise. kamikaze()
-// needs poll_detonation..detonate; fpv_kamikaze_set_ending_support (2026-10)
-// is missing from older kamikaze builds and stays null there.
+// Only in mod builds for a kamikaze libfpv (GTASA_FPV_KAMIKAZE, which defines
+// LIBFPV_KAMIKAZE): libfpv.h's fpv_frame differs between the two kinds.
+// kamikaze() needs poll_detonation..detonate; fpv_kamikaze_set_ending_support
+// (2026-10) is missing from older kamikaze builds and stays null there.
+#if defined(LIBFPV_KAMIKAZE)
 #define FPV_KAMIKAZE_FUNCTIONS(X)                                                                \
     X(fpv_kamikaze_poll_detonation) X(fpv_kamikaze_get_state) X(fpv_kamikaze_set_installed)    \
     X(fpv_kamikaze_get_config) X(fpv_kamikaze_detonate) X(fpv_kamikaze_set_config)             \
     X(fpv_kamikaze_set_ending_support)
+#else
+#define FPV_KAMIKAZE_FUNCTIONS(X)
+#endif
 
 // Wind (2026-10); null with an older libfpv.dll, which then flies in still air.
 #define FPV_WIND_FUNCTIONS(X) X(fpv_wind_defaults) X(fpv_wind_set) X(fpv_wind_set_sources) X(fpv_wind_add_blast)
@@ -59,7 +64,8 @@ extern Api fpv;
 bool load();
 bool loaded();
 
-// The loaded libfpv.dll carries a warhead (a kamikaze build).
+// The loaded libfpv.dll carries a warhead (a kamikaze build, and the mod is
+// built for one). Always false in plain mod builds.
 bool kamikaze();
 
 // What the player chose for CJ in F8 > Fly > Pilot (fpv_pilot_features and the

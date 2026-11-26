@@ -51,6 +51,7 @@ jobs:
           cmake -S gtasa-fpv -B gtasa-fpv/build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/gtasa-fpv/cmake/mingw-w64-i686.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DGTASA_FPV_KAMIKAZE=OFF \
             -DLIBFPV_DIR="$GITHUB_WORKSPACE/libfpv"
           cmake --build gtasa-fpv/build -j"$(nproc)"
 

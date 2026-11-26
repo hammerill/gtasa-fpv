@@ -413,11 +413,13 @@ void start() {
     g_clock_game = sa::timer_ms();
     g_clock_real = GetTickCount();
     fpvapi::set_raycast(true);
+#if defined(LIBFPV_KAMIKAZE)
     if (fpvapi::kamikaze()) {  // detonations of earlier drones are history
         fpv_detonation d;
         d.struct_size = sizeof d;
         while (fpv.fpv_kamikaze_poll_detonation(&d)) {}
     }
+#endif
     g_ending = Ending{};
     update_home();
     wind::reset();
@@ -512,7 +514,7 @@ const char *then_name(uint32_t then) {
 
 // The player's F8 > Kamikaze choice (or the autotest's), read at the blast.
 // The "then" itself runs from tick(), outside the camera hook.
-void begin_ending(const fpv_detonation &d) {
+[[maybe_unused]] void begin_ending(const fpv_detonation &d) {  // kamikaze builds
     kamikaze::EndingChoice e = kamikaze::ending_choice();
     if (tuning().after_blast >= 0)
         e.view = tuning().after_blast == 1 ? FPV_KAMIKAZE_VIEW_CUTSCENE : FPV_KAMIKAZE_VIEW_SIGNAL_LOST;
@@ -606,6 +608,7 @@ void step() {
     }
     update_home();
     update_pilot_position();
+#if defined(LIBFPV_KAMIKAZE)
     if (fpvapi::kamikaze()) {
         fpv_detonation d;
         d.struct_size = sizeof d;
@@ -617,6 +620,7 @@ void step() {
             if (!g_ending.on) begin_ending(d);
         }
     }
+#endif
     if (!g_ending.on) g_osd_visible = !g_pilot_view && g_view == View::Fpv;
     if (!g_ending.cutscene && !g_pilot_view)
         apply_camera(g_view == View::Fpv ? frame.camera : g_view == View::Chase ? frame.chase_camera : frame.los_camera,
@@ -640,6 +644,7 @@ void step() {
     log_timer += dt;
     if (log_timer > 1.0f) {
         log_timer = 0;
+#if defined(LIBFPV_KAMIKAZE)
         if (fpvapi::kamikaze()) {
             fpv_kamikaze_state ks{};
             ks.struct_size = sizeof ks;
@@ -647,6 +652,7 @@ void step() {
                 fpvlog::write("kamikaze: warhead %d (%.1f s to live), aux7 %.2f aux8 %.2f", int(ks.warhead),
                               ks.arming_remaining, frame.channels[10], frame.channels[11]);
         }
+#endif
         fpvlog::write("drone pos %.2f %.2f %.2f flags 0x%x alt %.2f thr %.2f fov %.1f (game %.1f, scale %.3f) near %.3f "
                       "wind %.1f %.1f %.1f arm '%s'",
                       frame.position[0], frame.position[1], frame.position[2], frame.flags, frame.altitude,

@@ -15,12 +15,15 @@ namespace {
 
 using fpvapi::fpv;
 
+#if defined(LIBFPV_KAMIKAZE)
 // Up to the 2026-10 libfpv, the mod kept its own "After the blast" choice
 // here; libfpv's F8 > Kamikaze tab has it now. A saved "cutscene" carries over once.
 std::string old_settings_file() { return paths::mod_dir() + "\\fpv-data\\gtasa-fpv.ini"; }
+#endif
 
 bool g_ready = false;
 
+#if defined(LIBFPV_KAMIKAZE)
 void migrate_old_setting() {
     std::string file = old_settings_file();
     FILE *f = std::fopen(file.c_str(), "r");
@@ -39,11 +42,13 @@ void migrate_old_setting() {
     }
     std::remove(file.c_str());
 }
+#endif
 
 }  // namespace
 
 EndingChoice ending_choice() {
     EndingChoice e;
+#if defined(LIBFPV_KAMIKAZE)
     if (!fpvapi::kamikaze()) return e;
     fpv_kamikaze_config kc{};
     kc.struct_size = sizeof kc;
@@ -55,12 +60,14 @@ EndingChoice ending_choice() {
     e.view = kc.ending_view == FPV_KAMIKAZE_VIEW_CUTSCENE ? uint32_t(FPV_KAMIKAZE_VIEW_CUTSCENE) : uint32_t(FPV_KAMIKAZE_VIEW_SIGNAL_LOST);
     e.seconds = kc.ending_duration >= 0 && kc.ending_duration <= 30 ? kc.ending_duration : 3.0f;
     e.then = kc.ending_then <= FPV_KAMIKAZE_THEN_NOTHING ? kc.ending_then : uint32_t(FPV_KAMIKAZE_THEN_RESPAWN);
+#endif
     return e;
 }
 
 void init() {
     if (g_ready || !fpvapi::kamikaze()) return;
     g_ready = true;
+#if defined(LIBFPV_KAMIKAZE)
     if (fpv.fpv_kamikaze_set_ending_support) {
         const uint32_t views = (1u << FPV_KAMIKAZE_VIEW_SIGNAL_LOST) | (1u << FPV_KAMIKAZE_VIEW_CUTSCENE);
         const uint32_t thens =
@@ -76,6 +83,7 @@ void init() {
     fpvlog::write("kamikaze: after the blast: %s for %.1f s, then %s",
                   e.view == FPV_KAMIKAZE_VIEW_CUTSCENE ? "cutscene" : "signal lost", e.seconds,
                   e.then == FPV_KAMIKAZE_THEN_RECALL ? "recall" : e.then == FPV_KAMIKAZE_THEN_NOTHING ? "nothing" : "respawn");
+#endif
 }
 
 void explode(const fpv_detonation &d) {

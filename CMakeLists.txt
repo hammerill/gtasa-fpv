@@ -10,6 +10,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(LIBFPV_DIR "$ENV{HOME}/Projects/libfpv" CACHE PATH "libfpv source checkout")
 set(LIBFPV_BUILD "${LIBFPV_DIR}/build/win32" CACHE PATH "libfpv i686 build dir")
+# Kamikaze builds of libfpv (libfpv docs/INTEGRATION.md "Kamikaze builds").
+# libfpv.h lays fpv_frame out differently with LIBFPV_KAMIKAZE (12 radio
+# channels instead of 10, so everything after them moves), so the mod must be
+# built for the kind of libfpv.dll it loads: ON only with a
+# -DLIBFPV_KAMIKAZE=ON libfpv. The core refuses a libfpv.dll of the other kind
+# (src/fpvapi.cpp). On a kamikaze dev machine (LIBFPV_KAMIKAZE_DEV=1 or true,
+# libfpv CLAUDE.md) local builds default to ON; CI never sets the variable.
+set(_kamikaze_default OFF)
+if("$ENV{LIBFPV_KAMIKAZE_DEV}" STREQUAL "1" OR "$ENV{LIBFPV_KAMIKAZE_DEV}" STREQUAL "true")
+  set(_kamikaze_default ON)
+endif()
+option(GTASA_FPV_KAMIKAZE "Build for a kamikaze libfpv.dll (dev only)" ${_kamikaze_default})
 
 # GTASA.FPV.asi: loader that hooks the game loop and hot-reloads the core.
 add_library(gtasa_fpv_loader SHARED
@@ -59,9 +71,10 @@ foreach(target gtasa_fpv_loader gtasa_fpv_core)
   # docs/renderers: fpv_video_d3d9.h, the video feed's renderer (src/video.cpp)
   target_include_directories(${target} PRIVATE src "${LIBFPV_DIR}/include" "${LIBFPV_DIR}/docs/renderers")
   # libfpv.dll is loaded at runtime; the header is only used for declarations.
-  # Kamikaze declarations too: the core finds out at runtime whether the
-  # loaded libfpv.dll has them (src/fpvapi.cpp), so either build works.
-  target_compile_definitions(${target} PRIVATE LIBFPV_STATIC LIBFPV_KAMIKAZE)
+  target_compile_definitions(${target} PRIVATE LIBFPV_STATIC)
+  if(GTASA_FPV_KAMIKAZE)
+    target_compile_definitions(${target} PRIVATE LIBFPV_KAMIKAZE)
+  endif()
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-unused-parameter)
   target_link_options(${target} PRIVATE -static)
 endforeach()

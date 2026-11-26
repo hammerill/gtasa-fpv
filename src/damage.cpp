@@ -244,7 +244,9 @@ void shot(sa::CEntity *owner, const sa::CVector &from, const sa::CVector &to) {
         fpvlog::write("damage: bullet from %s (%.0f m) through the body, %.2f m from the centre", who,
                       distance(a, g_centre), miss);
         // The warhead is on the body: it goes off, armed or not. Without one, the drone falls.
+#if defined(LIBFPV_KAMIKAZE)
         if (!(fpvapi::kamikaze() && fpvapi::fpv.fpv_kamikaze_detonate(g_drone, 1) == FPV_OK))
+#endif
             fpvapi::damage_props(g_drone, -1, kBlast);
         return;
     }
